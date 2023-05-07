@@ -37,3 +37,22 @@ Proxmox VE使用RESTful API。我们选择JSON作为主要数据格式，并使�
 Proxmox VE支持多种认证来源，如Microsoft Active Directory、LDAP、Linux PAM标准认证或内置的Proxmox VE认证服务器。
 这样，您可以根据组织的需求和现有的认证基础设施选择合适的认证方法。
 
+1.2 灵活的存储
+Proxmox VE的存储模型非常灵活。虚拟机映像可以存储在一个或多个本地存储上，也可以存储在诸如NFS的共享存储和SAN上。
+没有限制，您可以根据需要配置任意数量的存储定义。您可以使用Debian Linux可用的所有存储技术。
+
+将虚拟机存储在共享存储上的一个主要优势是能够在不中断的情况下实时迁移运行中的虚拟机，因为集群中的所有节点都可以直接访问虚拟机磁盘映像。
+
+我们目前支持以下网络存储类型：
+    LVM Group（使用iSCSI目标的网络支持）
+    iSCSI目标
+    NFS共享
+    CIFS共享
+    Ceph RBD
+    直接使用iSCSI LUN
+    GlusterFS
+
+支持的本地存储类型包括：
+    LVM Group（本地支持设备，如块设备、FC设备、DRBD等）
+    目录（现有文件系统上的存储）
+    ZFS
