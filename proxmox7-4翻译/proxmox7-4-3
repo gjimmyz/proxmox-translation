@@ -146,6 +146,474 @@ Proxmox VE 不会直接将更改写入 /etc/network/interfaces。相反，我们
 另一种应用新网络配置的方法是重新启动节点。在这种情况下，systemd 服务 pvenetcommit 将在网络服务应用该配置之前激活暂存的 interfaces.new 
 文件。这样，在节点重启时，新的网络配置将被应用。
 
+3.3.2 命名约定
+我们目前使用以下命名约定来表示设备名称：
+    以太网设备：en*，systemd 网络接口名称。这种命名方案自 Proxmox VE 5.0 版本以来用于新的 Proxmox VE 安装。
+    以太网设备：eth[N]，其中 0 ≤ N（eth0, eth1, ...）这种命名方案用于在 5.0 版本之前安装的 Proxmox VE 主机。升级到 5.0 时，名称保持不变。
+    桥接器名称：vmbr[N]，其中 0 ≤ N ≤ 4094（vmbr0 - vmbr4094）
+    Bonds：bond[N]，其中 0 ≤ N（bond0, bond1, ...）
+    VLAN：简单地将 VLAN 编号添加到设备名称，用句点分隔（eno1.50，bond1.30）
+这使得调试网络问题更加容易，因为设备名称暗示了设备类型。
+Systemd 网络接口名称
+Systemd 对以太网网络设备使用两个字符前缀 en。接下来的字符取决于设备驱动程序以及首先匹配的方案。
+    o<index>[n<phys_port_name>|d<dev_port>] — 板载设备
+    s<slot>[f<function>][n<phys_port_name>|d<dev_port>] — 通过热插拔 ID 的设备
+    [P<domain>]p<bus>s<slot>[f<function>][n<phys_port_name>|d<dev_port>] — 按总线 ID 的设备
+    x<MAC> — 通过 MAC 地址的设备
+最常见的模式是：
+    eno1 — 是第一个板载 NIC
+    enp3s0f1 — 是位于 pcibus 3 插槽 0 的 NIC，并使用 NIC 功能 1。
+有关更多信息，请参阅可预测的网络接口名称。
+
+3.3.3 选择网络配置
+根据您当前的网络组织和资源，您可以选择桥接、路由或伪装网络设置。
+位于私有 LAN 中的 Proxmox VE 服务器，使用外部网关访问互联网
+在这种情况下，桥接模型是最有意义的，这也是新 Proxmox VE 安装的默认模式。您的每个客户端系统都将拥有一个连接到 Proxmox VE 
+桥接器的虚拟接口。这在效果上类似于将客户端网络卡直接连接到 LAN 上的新交换机，Proxmox VE 主机充当交换机的角色。
+托管在托管提供商处的 Proxmox VE 服务器，为客户端提供公共 IP 范围
+对于此设置，您可以根据提供商允许的情况使用桥接或路由模型。
+托管在托管提供商处的 Proxmox VE 服务器，具有单个公共 IP 地址
+在这种情况下，为您的客户端系统获得外部网络访问的唯一方法是使用伪装。对于传入客户端的网络访问，您需要配置端口转发。
+为了进一步提高灵活性，您可以配置 VLAN（IEEE 802.1q）和网络绑定，也称为“链路聚合”。这样就可以构建复杂而灵活的虚拟网络。
+
+3.3.4 使用桥接的默认配置
+桥接就像是用软件实现的物理网络交换机。所有虚拟客户端都可以共享单个桥接，或者您可以创建多个桥接来分隔网络域。每个主机最多可以有 4094 个桥接。
+安装程序创建一个名为 vmbr0 的单个桥接，该桥接连接到第一个以太网卡。在 /etc/network/interfaces 中的相应配置可能如下所示：
+auto lo
+iface lo inet loopback
+iface eno1 inet manual
+auto vmbr0
+iface vmbr0 inet static
+address 192.168.10.2/24
+gateway 192.168.10.1
+bridge-ports eno1
+bridge-stp off
+bridge-fd 0
+虚拟机的行为就好像它们直接连接到物理网络一样。反过来，网络会将每个虚拟机视为拥有自己的 MAC，尽管只有一根网络电缆将所有这些虚拟机连接到网络。
+
+3.3.5 路由配置
+大多数托管提供商不支持上述设置。出于安全原因，当他们在单个接口上检测到多个 MAC 地址时，他们会禁用网络。
+提示
+某些提供商允许您通过其管理界面注册额外的 MAC。这可以避免问题，但是配置起来可能很麻烦，因为您需要为每个虚拟机注册一个 MAC。
+您可以通过通过单个接口“路由”所有流量来避免此问题。这确保所有网络数据包使用相同的 MAC 地址。
+一个常见的场景是，您有一个公共 IP（本例中假设为 198.51.100.5），以及一个为 VM 提供的额外 IP 块（203.0.113.16/28）。对于这种情况，我们建议使用以下设置：
+auto lo
+iface lo inet loopback
+auto eno0
+iface eno0 inet static
+address 198.51.100.5/29
+gateway 198.51.100.1
+post-up echo 1 > /proc/sys/net/ipv4/ip_forward
+post-up echo 1 > /proc/sys/net/ipv4/conf/eno0/proxy_arp
+auto vmbr0
+iface vmbr0 inet static
+address 203.0.113.17/28
+bridge-ports none
+bridge-stp off
+bridge-fd 0
+
+3.3.6 使用 iptables 进行伪装 (NAT)
+伪装允许只有私有 IP 地址的客户端通过使用主机 IP 地址访问网络进行出站流量。
+每个出站数据包都被 iptables 重写，使其看起来像是来自主机，并相应地重写响应以将其路由到原始发送者。
+auto lo
+iface lo inet loopback
+auto eno1
+真实 IP 地址
+iface eno1 inet static
+address 198.51.100.5/24
+gateway 198.51.100.1
+auto vmbr0
+私有子网
+iface vmbr0 inet static
+address 10.10.10.1/24
+bridge-ports none
+bridge-stp off
+bridge-fd 0
+post-up echo 1 > /proc/sys/net/ipv4/ip_forward
+post-up iptables -t nat -A POSTROUTING -s '10.10.10.0/24' -o eno1 -j MASQUERADE
+post-down iptables -t nat -D POSTROUTING -s '10.10.10.0/24' -o eno1 -j MASQUERADE
+注意
+在某些启用防火墙的伪装设置中，可能需要连接跟踪区域进行出站连接。否则，防火墙可能会阻止出站连接，因为它们将优先使用 VM 桥的 POSTROUTING（而不是伪装）。
+在 /etc/network/interfaces 中添加以下行可以解决此问题：
+post-up iptables -t raw -I PREROUTING -i fwbr+ -j CT --zone 1
+post-down iptables -t raw -D PREROUTING -i fwbr+ -j CT --zone 1
+有关此内容的更多信息，请参阅以下链接：
+Netfilter 数据包流
+在 netdev-list 上引入连接跟踪区域的补丁
+使用 raw 表中的 TRACE 进行良好解释的博客文章
+
+3.3.7 Linux Bond
+绑定（也称为 NIC 组队或链路聚合）是一种将多个 NIC 绑定到单个网络设备的技术。通过它可以实现不同的目标，如使网络容错，提高性能或两者兼而有之。
+像光纤通道这样的高速硬件及其相关的交换硬件可能相当昂贵。通过进行链路聚合，两个 NIC 可以作为一个逻辑接口，从而实现双倍速度。这是一种原生 Linux 
+内核功能，得到了大多数交换机的支持。如果您的节点有多个以太网端口，您可以通过将网络电缆连接到不同的交换机来分布故障点，
+而绑定的连接将在出现网络故障时故障切换到另一根电缆。
+聚合链接可以减少实时迁移延迟，提高 Proxmox VE 集群节点之间的数据复制速度。
+绑定有 7 种模式：
+• 循环轮询（balance-rr）：从第一个可用网络接口（NIC）从属设备顺序传输网络数据包到最后一个。此模式提供负载均衡和容错能力。
+• 主备模式（active-backup）：绑定中只有一个 NIC 从设备处于活动状态。只有在活动从设备故障时，另一个从设备才会变为活动状态。单个逻辑绑定接口的 MAC 地址仅在一个 NIC（端口）上对外可见，以避免网络交换机中的失真。此模式提供容错能力。
+• 异或（balance-xor）：根据 [(源 MAC 地址 XOR 目标 MAC 地址) 模 NIC 从设备计数] 传输网络数据包。此模式为每个目标 MAC 地址选择相同的 NIC 从设备。此模式提供负载均衡和容错能力。
+• 广播（broadcast）：在所有从属网络接口上传输网络数据包。此模式提供容错能力。
+• IEEE 802.3ad 动态链路聚合（802.3ad）(LACP)：创建共享相同速度和双工设置的聚合组。根据 802.3ad 规范使用活动聚合组中的所有从属网络接口。
+• 自适应传输负载平衡（balance-tlb）：不需要任何特殊网络交换机支持的 Linux 
+绑定驱动程序模式。根据每个网络接口从设备的当前负载（相对于速度计算）分发传出网络数据包流量。传入流量由当前指定的从属网络接口接收。
+如果接收从设备出现故障，另一个从设备会接管已故障接收从设备的 MAC 地址。
+• 自适应负载平衡（balance-alb）：包括 balance-tlb 以及针对 IPV4 流量的接收负载平衡（rlb），无需任何特殊网络交换机支持。通过 ARP 
+协商实现接收负载平衡。绑定驱动程序拦截本地系统发送的 ARP 回复，并将源硬件地址覆盖为单个逻辑绑定接口中的一个 NIC 从设备的唯一硬件地址，
+从而使不同的网络对等方使用不同的 MAC 地址进行网络数据包传输。
+如果您的交换机支持 LACP（IEEE 802.3ad）协议，那么我们建议使用相应的绑定模式（802.3ad）。否则，您通常应使用 active-backup 模式。
+如果您打算在绑定接口上运行集群网络，那么您必须在绑定接口上使用 active-passive 模式，其他模式不受支持。
+以下绑定配置可用作分布式/共享存储网络。优点是您可以获得更高的速度，而且网络将具有容错能力。
+这个示例展示了如何使用固定 IP 地址配置网络绑定
+auto lo
+iface lo inet loopback
+iface eno1 inet manual
+iface eno2 inet manual
+iface eno3 inet manual
+auto bond0
+iface bond0 inet static
+bond-slaves eno1 eno2
+address 192.168.1.2/24
+bond-miimon 100
+bond-mode 802.3ad
+bond-xmit-hash-policy layer2+3
+auto vmbr0
+iface vmbr0 inet static
+address 10.10.10.2/24
+gateway 10.10.10.1
+bridge-ports eno3
+bridge-stp off
+bridge-fd 0
+将 bond 直接用作桥接端口是另一种可能性。这可以用于提高虚拟机网络的容错能力。
+以下是使用 bond 作为桥接端口的示例：
+auto lo
+iface lo inet loopback
+iface eno1 inet manual
+iface eno2 inet manual
+auto bond0
+iface bond0 inet manual
+bond-slaves eno1 eno2
+bond-miimon 100
+bond-mode 802.3ad
+bond-xmit-hash-policy layer2+3
+auto vmbr0
+iface vmbr0 inet static
+address 10.10.10.2/24
+gateway 10.10.10.1
+bridge-ports bond0
+bridge-stp off
+bridge-fd 0
+
+3.3.8 VLAN 802.1Q
+虚拟局域网（VLAN）是一个在二层网络中划分和隔离的广播域。因此，在一个物理网络中可以有多个网络（4096个），
+每个网络彼此独立。每个VLAN网络都由一个通常称为标签的数字来识别。网络数据包会被打上标签以识别它们属于哪个虚拟网络。
+针对客户机网络的VLAN
+Proxmox VE支持开箱即用的设置。当您创建虚拟机时，可以指定VLAN标签。VLAN标签是客户机网络配置的一部分。根据桥接配置，网络层支持实现VLAN的不同模式：
+    Linux桥上的VLAN感知：在这种情况下，每个客户机的虚拟网络卡会分配一个VLAN标签，该标签由Linux桥透明支持。Trunk模式也是可能的，但这需要在客户机中进行配置。
+    Linux桥上的“传统”VLAN：与VLAN感知方法相反，此方法不透明，为每个VLAN创建一个带有关联桥接的VLAN设备。也就是说，例如在VLAN 
+    5上创建一个客户机，会创建两个接口eno1.5和vmbr0v5，这些接口将一直保留，直到重新启动发生。
+    Open vSwitch VLAN：此模式使用OVS VLAN功能。
+    客户机配置的VLAN：VLAN在客户机内部分配。在这种情况下，设置完全在客户机内部完成，无法从外部影响。好处是您可以在单个虚拟网络接口上使用多个VLAN。
+主机上的VLAN
+为了允许主机与隔离网络进行通信，可以将VLAN标签应用于任何网络设备（NIC，Bond，Bridge）。通常，您应该在与物理NIC之间抽象层次最少的接口上配置VLAN。
+例如，在默认配置中，您希望将主机管理地址放在单独的VLAN上。
+示例：使用传统Linux桥在VLAN 5上为Proxmox VE管理IP。
+auto lo
+iface lo inet loopback
+iface eno1 inet manual
+iface eno1.5 inet manual
+auto vmbr0v5
+iface vmbr0v5 inet static
+address 10.10.10.2/24
+gateway 10.10.10.1
+bridge-ports eno1.5
+bridge-stp off
+bridge-fd 0
+auto vmbr0
+iface vmbr0 inet manual
+bridge-ports eno1
+bridge-stp off
+bridge-fd 0
+示例：使用VLAN感知Linux桥在VLAN 5上为Proxmox VE管理IP。
+auto lo
+iface lo inet loopback
+iface eno1 inet manual
+auto vmbr0.5
+iface vmbr0.5 inet static
+address 10.10.10.2/24
+gateway 10.10.10.1
+auto vmbr0
+iface vmbr0 inet manual
+bridge-ports eno1
+bridge-stp off
+bridge-fd 0
+bridge-vlan-aware yes
+bridge-vids 2-4094
+接下来的示例是相同的设置，但使用bond使该网络具有故障保护功能。
+示例：使用传统Linux桥将VLAN 5与bond0一起用于Proxmox VE管理IP。
+auto lo
+iface lo inet loopback
+iface eno1 inet manual
+iface eno2 inet manual
+auto bond0
+iface bond0 inet manual
+bond-slaves eno1 eno2
+bond-miimon 100
+bond-mode 802.3ad
+bond-xmit-hash-policy layer2+3
+iface bond0.5 inet manual
+auto vmbr0v5
+iface vmbr0v5 inet static
+address 10.10.10.2/24
+gateway 10.10.10.1
+bridge-ports bond0.5
+bridge-stp off
+bridge-fd 0
+auto vmbr0
+iface vmbr0 inet manual
+bridge-ports bond0
+bridge-stp off
+bridge-fd 0
+
+3.3.9 在节点上禁用IPv6
+无论是否部署了IPv6，Proxmox VE都可以在所有环境中正常工作。我们建议保留所有提供的默认设置。
+如果您仍需要在节点上禁用对IPv6的支持，请通过创建适当的sysctl.conf（5）片段文件并设置适当的sysctl来实现，
+例如添加/etc/sysctl.d/disable-ipv6.conf文件，并包含以下内容：
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+此方法优于在内核命令行上禁用加载IPv6模块。
+
+3.3.10 在桥上禁用MAC学习
+默认情况下，桥上启用了MAC学习，以确保虚拟客户端及其网络的流畅体验。
+但在某些环境中，这可能是不需要的。从Proxmox VE 7.3开始，
+您可以通过在“/etc/network/interfaces”中的桥上设置“bridge-disable-mac-learning 1”配置来禁用桥上的MAC学习，例如：
+...
+auto vmbr0
+iface vmbr0 inet static
+address 10.10.10.2/24
+gateway 10.10.10.1
+bridge-ports ens18
+bridge-stp off
+bridge-fd 0
+bridge-disable-mac-learning 1
+启用后，Proxmox VE将手动将虚拟机和容器的配置过的MAC地址添加到桥的转发数据库中，以确保客户端仍然可以使用网络——但前提是它们使用的是实际的MAC地址。
+
+3.4 时间同步
+Proxmox VE集群堆栈本身严重依赖于所有节点具有精确同步的时间。某些其他组件（如Ceph）也无法在所有节点的本地时间未同步的情况下正常工作。
+节点之间的时间同步可以使用“网络时间协议”（NTP）实现。从Proxmox VE 7开始，chrony被用作默认的NTP守护程序，而Proxmox VE 
+6使用systemd-timesyncd。两者都预先配置为使用一组公共服务器。
+重要提示
+如果将系统升级到Proxmox VE 7，建议您手动安装chrony，ntp或openntpd。
+
+3.4.1 使用自定义NTP服务器
+在某些情况下，可能需要使用非默认的NTP服务器。例如，如果您的Proxmox VE节点由于限制性的防火墙规则而无法访问公共互联网，您需要设置本地NTP服务器并告诉NTP守护程序使用它们。
+对于使用chrony的系统：
+在/etc/chrony/chrony.conf中指定chrony应使用的服务器：
+server ntp1.example.com iburst
+server ntp2.example.com iburst
+server ntp3.example.com iburst
+重新启动chrony：
+systemctl restart chronyd
+检查日志以确认正在使用新配置的NTP服务器：
+# journalctl --since -1h -u chrony
+...
+Aug 26 13:00:09 node1 systemd[1]: Started chrony, an NTP client/server.
+Aug 26 13:00:15 node1 chronyd[4873]: Selected source 10.0.0.1 (ntp1.example  -
+.com)
+Aug 26 13:00:15 node1 chronyd[4873]: System clock TAI offset set to 37  -
+seconds
+...
+对于使用systemd-timesyncd的系统：
+在/etc/systemd/timesyncd.conf中指定systemd-timesyncd应使用的服务器：
+[Time]
+NTP=ntp1.example.com ntp2.example.com ntp3.example.com ntp4.example.com
+然后，重启同步服务（systemctl restart systemd-timesyncd），并通过检查日志来验证您的新配置的NTP服务器是否正在使用。
+(journalctl --since -1h
+-u systemd-timesyncd):
+...
+Oct 07 14:58:36 node1 systemd[1]: Stopping Network Time Synchronization...
+Oct 07 14:58:36 node1 systemd[1]: Starting Network Time Synchronization...
+Oct 07 14:58:36 node1 systemd[1]: Started Network Time Synchronization.
+Oct 07 14:58:36 node1 systemd-timesyncd[13514]: Using NTP server  -
+10.0.0.1:123 (ntp1.example.com).
+Oct 07 14:58:36 node1 systemd-timesyncd[13514]: interval/delta/delay/jitter  -
+/drift 64s/-0.002s/0.020s/0.000s/-31ppm
+...
+
+3.5 外部指标服务器
+在Proxmox VE中，您可以定义外部指标服务器，这些服务器将定期接收有关您的主机、虚拟客户机和存储的各种统计信息。
+目前支持的有：
+• Graphite（请参阅 https://graphiteapp.org ）
+• InfluxDB（请参阅 https://www.influxdata.com/time-series-platform/influxdb/ ）
+外部指标服务器定义保存在 /etc/pve/status.cfg 中，可以通过Web界面进行编辑。
+
+3.5.1 Graphite服务器配置
+默认端口设置为2003，而默认的Graphite路径为proxmox。
+默认情况下，Proxmox VE通过UDP发送数据，因此Graphite服务器必须配置为接受此类数据。
+在此处，可以为不使用标准1500 MTU的环境配置最大传输单元（MTU）。
+您还可以将插件配置为使用TCP。为了不阻塞重要的pvestatd统计收集守护程序，需要一个超时来应对网络问题。
+
+3.5.2 Influxdb插件配置。Proxmox VE通过UDP发送数据，因此必须为Influxdb服务器进行配置。如果需要，也可以在此处配置MTU。
+以下是Influxdb的示例配置（在您的Influxdb服务器上）：
+[[udp]]
+enabled = true
+bind-address = "0.0.0.0:8089"
+database = "proxmox"
+batch-size = 1000
+batch-timeout = "1s"
+根据此配置，您的服务器将在所有IP地址上的8089端口上监听，并将数据写入proxmox数据库。
+或者，该插件可以配置为使用InfluxDB 2.x的http(s) API。InfluxDB 1.8.x确实包含了这个v2 API的向前兼容的API端点。
+要使用它，将influxdbproto设置为http或https（取决于您的配置）。默认情况下，Proxmox VE使用proxmox组织和proxmox存储桶/数据库（它们可以分别使用配置组织和存储桶进行设置）。
+由于InfluxDB的v2 API只能通过身份验证使用，因此您必须生成一个可以写入正确存储桶的令牌并设置它。
+在1.8.x的v2兼容API中，您可以使用user:password作为令牌（如果需要），并可以省略组织，因为在InfluxDB 1.x中没有意义。
+您还可以使用超时设置设置HTTP超时（默认为1s），以及使用max-body-size设置设置最大批量大小（默认为25000000字节）（这对应于同名的InfluxDB设置）。
+
+3.6 磁盘健康监控
+尽管建议使用强大且冗余的存储，但监视本地磁盘的健康状况可能非常有帮助。
+从Proxmox VE 4.3开始，安装并需要使用smartmontools 1包。这是一组用于监控和控制本地硬盘的S.M.A.R.T.系统的工具。
+您可以通过执行以下命令来获取磁盘的状态：
+smartctl -a /dev/sdX
+其中 /dev/sdX 是您本地磁盘的路径之一。
+如果输出显示：
+SMART support is: Disabled
+您可以使用以下命令启用它：
+smartctl -s on /dev/sdX
+有关如何使用smartctl的更多信息，请参阅man smartctl。
+默认情况下，smartmontools守护程序smartd处于活动状态并已启用，并且每30分钟扫描位于 /dev/sdX 和 /dev/hdX 的磁盘以查找错误和警告，如果检测到问题，则向root发送一封电子邮件。
+有关如何配置smartd的更多信息，请参阅man smartd 和 man smartd.conf。
+如果您将硬盘与硬件RAID控制器一起使用，那么很可能有一些工具可以监控RAID阵列中的磁盘以及阵列本身。有关此信息，请参阅您的RAID控制器的供应商。
+
+3.7 逻辑卷管理器（LVM）
+大多数人将Proxmox VE直接安装在本地磁盘上。Proxmox 
+VE安装CD为本地磁盘管理提供了几个选项，当前的默认设置使用LVM。安装程序让您选择一个磁盘进行此类设置，并将该磁盘用作卷组（VG）pve的物理卷。
+以下输出来自使用小型8GB磁盘的测试安装：
+安装程序在此VG内分配了三个逻辑卷（LV）：
+root
+格式化为ext4，包含操作系统。
+1smartmontools主页https://www.smartmontools.org
+swap
+交换分区
+data
+此卷使用LVM-thin，并用于存储VM映像。LVM-thin更适合执行此任务，因为它为快照和克隆提供了高效的支持。
+对于Proxmox VE 4.1及更早版本，安装程序会创建一个名为“data”的标准逻辑卷，挂载在 /var/lib/vz。
+从4.2版本开始，“data”逻辑卷是一个LVM-thin池，用于存储基于块的客户端映像，/var/lib/vz只是根文件系统上的一个目录。
+
+3.7.1 硬件
+我们强烈建议在这种设置中使用具有BBU的硬件RAID控制器。这将提高性能，提供冗余，并使磁盘更换更容易（热插拔）。
+LVM本身不需要任何特殊的硬件，内存要求非常低。
+
+3.7.2 引导加载程序
+默认情况下，我们安装了两个引导加载程序。第一个分区包含标准的GRUB引导加载程序。第二个分区是EFI系统分区（ESP），使其可以在EFI系统上引导。
+
+3.7.3 创建卷组
+假设我们有一个空磁盘 /dev/sdb，我们想在其上创建一个名为“vmdata”的卷组。
+警告
+请注意，以下命令将销毁 /dev/sdb 上的所有现有数据。
+首先创建一个分区。
+sgdisk -N 1 /dev/sdb
+在没有确认和250K元数据大小的情况下创建物理卷（PV）。
+pvcreate --metadatasize 250k -y -ff /dev/sdb1
+在 /dev/sdb1 上创建名为“vmdata”的卷组
+vgcreate vmdata /dev/sdb1
+
+3.7.4 为 /var/lib/vz 创建额外的LV
+通过创建一个新的细分LV可以轻松完成。
+lvcreate -n <Name> -V <Size[M,G,T]> <VG>/<LVThin_pool>
+一个真实世界的例子：
+lvcreate -n vz -V 10G pve/data
+现在必须在LV上创建一个文件系统。
+mkfs.ext4 /dev/pve/vz
+最后，这必须被挂载。
+警告
+确保 /var/lib/vz 是空的。在默认安装中，它不是空的。
+要使其始终可访问，在 /etc/fstab 中添加以下行。
+echo ’/dev/pve/vz /var/lib/vz ext4 defaults 0 2’ >> /etc/fstab
+
+3.7.5 调整thin pool的大小
+使用以下命令调整LV和元数据池的大小：
+lvresize --size +<size[\M,G,T]> --poolmetadatasize +<size[\M,G]> < -
+VG>/<LVThin_pool>
+注意
+在扩展数据池时，元数据池也必须扩展。
+
+3.7.6 创建LVM-thin池
+一个thin池必须在卷组的基础上创建。如何创建卷组，请参见LVM部分。
+lvcreate -L 80G -T -n vmstore vmdata
+
+3.8 ZFS on Linux
+ZFS 是 Sun Microsystems 设计的一种组合文件系统和逻辑卷管理器。从 Proxmox VE 3.4 开始，作为可选文件系统以及根文件系统的附加选择，
+引入了 ZFS 文件系统的本机 Linux 内核端口。无需手动编译 ZFS 模块 - 所有软件包都已包含。
+通过使用 ZFS，可以通过低预算硬件实现最大的企业功能，但也可以通过利用 SSD 缓存甚至仅使用 SSD 设置实现高性能系统。ZFS 可以通过适度的 CPU 和内存负载以及简便的管理来替换成本高的硬件 RAID 卡。
+ZFS的一般优势
+• 使用 Proxmox VE GUI 和 CLI 进行简单的配置和管理。
+• 可靠
+• 防止数据损坏
+• 文件系统级数据压缩
+• 快照
+• 写时复制克隆
+• 多种 RAID 级别：RAID0、RAID1、RAID10、RAIDZ-1、RAIDZ-2、RAIDZ-3、dRAID、dRAID2、dRAID3
+• 可以使用 SSD 进行缓存
+• 自我修复
+• 持续完整性检查
+• 为大容量存储而设计
+• 异步网络复制
+• 开源
+• 加密
+• . . .
+
+3.8.1 硬件
+ZFS 严重依赖内存，因此至少需要 8GB 内存才能启动。在实践中，根据您的硬件/预算，尽可能多地使用内存。为了防止数据损坏，我们建议使用高质量的 ECC RAM。
+如果您使用专用缓存和/或日志磁盘，则应使用企业级 SSD。这可以显著提高整体性能。
+重要提示
+不要在具有自己的缓存管理的硬件 RAID 控制器上使用 ZFS。ZFS 需要直接与磁盘通信。HBA 适配器或类似于以 “IT” 模式刷新的 LSI 控制器更合适。
+如果您正在尝试在 VM 中安装 Proxmox VE（嵌套虚拟化），请不要对该 VM 使用 virtio 磁盘，因为 ZFS 不支持它们。请改用 IDE 或 SCSI（也适用于 virtio SCSI 控制器类型）。
+
+3.8.2 作为根文件系统的安装
+当您使用 Proxmox VE 安装程序安装时，可以选择将 ZFS 用作根文件系统。您需要在安装时选择 RAID 类型：
+RAID0 也称为“条带化”。这种卷的容量是所有磁盘容量之和。但 RAID0 不增加任何冗余，因此单个驱动器的故障会导致卷无法使用。
+RAID1 也称为“镜像”。数据被完全相同地写入所有磁盘。此模式至少需要2个相同大小的磁盘。产生的容量等于单个磁盘的容量。
+RAID10 是 RAID0 和 RAID1 的组合。至少需要 4 个磁盘。
+RAIDZ-1 是 RAID-5 的变种，单奇偶校验。至少需要 3 个磁盘。
+RAIDZ-2 是 RAID-5 的变种，双奇偶校验。至少需要 4 个磁盘。
+RAIDZ-3 是 RAID-5 的变种，三重奇偶校验。至少需要 5 个磁盘。
+安装程序会自动对磁盘进行分区，创建一个名为 rpool 的 ZFS 池，并在 ZFS 子卷 rpool/ROOT/pve-1 上安装根文件系统。
+创建另一个名为 rpool/data 的子卷来存储 VM 映像。为了与 Proxmox VE 工具一起使用，安装程序在 /etc/pve/storage.cfg 中创建以下配置条目：
+zfspool: local-zfs
+pool rpool/data
+sparse
+content images,rootdir
+安装后，您可以使用 zpool 命令查看您的 ZFS 池状态：
+# zpool status
+pool: rpool
+state: ONLINE
+scan: none requested
+config:
+NAME STATE READ WRITE CKSUM
+rpool ONLINE 0 0 0
+mirror-0 ONLINE 0 0 0
+sda2 ONLINE 0 0 0
+sdb2 ONLINE 0 0 0
+mirror-1 ONLINE 0 0 0
+sdc ONLINE 0 0 0
+sdd ONLINE 0 0 0
+errors: No known data errors
+zfs 命令用于配置和管理您的 ZFS 文件系统。以下命令在安装后列出所有文件系统：
+
+3.8.3 ZFS RAID 级别考虑因素
+在选择 ZFS 池的布局时，有一些因素需要考虑。ZFS 池的基本构建模块是虚拟设备，或称为 vdev。
+池中的所有 vdev 都被平等使用，数据在它们之间分条存储（RAID0）。有关 vdevs 的更多详细信息，请查阅 zpool(8) 手册页。
+性能
+每种 vdev 类型具有不同的性能特性。感兴趣的两个参数是 IOPS（每秒输入/输出操作数）和可以写入或读取数据的带宽。
+在写入数据时，镜像 vdev（RAID1）在这两个参数方面的表现大致类似于单个磁盘。在读取数据时，性能将随镜像中磁盘数量线性增长。
+一个常见的情况是拥有 4 个磁盘。将其设置为 2 个镜像 vdev（RAID10）时，池在 IOPS 和带宽方面的写特性将类似于两个单独的磁盘。对于读操作，它将类似于 4 个单独的磁盘。
+任何冗余级别的 RAIDZ 大约在 IOPS 方面的表现类似于单个磁盘，但带宽很大。具体有多少带宽取决于 RAIDZ vdev 的大小和冗余级别。
+对于运行 VM，IOPS 在大多数情况下是更重要的指标。
+大小、空间使用和冗余
+虽然由镜像 vdev 组成的池将具有最佳性能特性，但可用空间将为磁盘可用空间的 50%。如果镜像 vdev 由多于 2 个磁盘组成，例如在 3 路镜像中，可用空间会更少。
+为了保持池的正常运行，每个镜像至少需要一个健康磁盘。
+RAIDZ 类型 vdev 的可用空间大约为 N-P，其中 N 为磁盘数，P 为 RAIDZ 级别。RAIDZ 级别表示在不丢失数据的情况下可以失败的任意磁盘数量。
+一个特殊情况是一个具有 RAIDZ2 的 4 磁盘池。在这种情况下，通常最好使用 2 个镜像 vdev 以获得更好的性能，因为可用空间将相同。
+
+
 
 
 
