@@ -1210,16 +1210,130 @@ proxmox-boot-tool 处理以下任务：
 proxmox-boot-tool status
 5这包括所有安装在 ext4 或 xfs 上的根目录以及在非 EFI 系统上安装在 ZFS 上的根目录
 6使用 grub 引导根目录上的 ZFS https://github.com/zfsonlinux/zfs/wiki/Debian-Stretch-Root-on-ZFS
+设置新分区以用作同步的 ESP
+为了格式化并初始化作为同步 ESP 的分区，例如，在替换 rpool 中的失败 vdev 后，或者在转换预先存在同步机制的现有系统时，
+可以使用 pve-kernel-helpers 的 proxmox-boot-tool。
+警告
+format 命令将格式化 <partition>，请确保传入正确的设备/分区！
+例如，要将空分区 /dev/sda2 格式化为 ESP，请运行以下命令：
+proxmox-boot-tool format /dev/sda2
+要设置位于 /dev/sda2 的现有、未挂载的 ESP，以便包含在 Proxmox VE 的内核更新同步机制中，请使用以下命令：
+proxmox-boot-tool init /dev/sda2
+之后，/etc/kernel/proxmox-boot-uuids 应该包含一个新行，其中包含新添加分区的 UUID。init 命令也会自动触发刷新所有配置的 ESP。
+在所有 ESP 上更新配置
+要复制和配置所有可引导的内核并保持 /etc/kernel/proxmox-boot-uuids 中列出的所有 ESP 的同步，你只需要运行：
+proxmox-boot-tool refresh
+（这等价于在 ext4 或 xfs 上的 root 系统上运行 update-grub）。
+如果您对内核命令行进行了更改，或者想要同步所有内核和 initrds，这是必要的。
+注意
+update-initramfs 和 apt（在必要时）会自动触发刷新。
+proxmox-boot-tool 考虑的内核版本
+默认配置了以下内核版本：
+    当前正在运行的内核
+    在包更新时新安装的版本
+    已安装的两个最新内核
+    如果适用，最后第二个内核系列（例如 5.0，5.3）的最新版本
+    任何手动选择的内核
+手动保持内核可引导
+如果您希望将某个内核和 initrd 映像添加到可引导内核列表，请使用 proxmox-boot-tool kernel add。
+例如，运行以下命令将 ABI 版本为 5.0.15-1-pve 的内核添加到要保持安装并同步到所有 ESP 的内核列表中：
+proxmox-boot-tool kernel add 5.0.15-1-pve
+proxmox-boot-tool kernel list 将列出当前选择用于引导的所有内核版本：
+proxmox-boot-tool kernel list
+手动选择的内核：
+5.0.15-1-pve
+自动选择的内核：
+5.0.12-1-pve
+4.15.18-18-pve
+运行 proxmox-boot-tool kernel remove 来从手动选择的内核列表中删除一个内核，例如：
+proxmox-boot-tool kernel remove 5.0.15-1-pve
+注意
+在从上述手动内核添加或移除后，需要运行 proxmox-boot-tool refresh 来更新所有 EFI 系统分区（ESP）。
 
+3.12.3 确定使用哪个引导程序
+确定使用哪种引导加载程序的最简单和最可靠的方法是观察 Proxmox VE 节点的启动过程。您会看到 grub 的蓝色框或者简单的黑白 systemd-boot。
+从正在运行的系统中确定引导加载程序可能不是 100% 准确。最安全的方式是运行以下命令：
+efibootmgr -v
+如果它返回 EFI 变量不受支持的消息，那么 grub 在 BIOS/Legacy 模式下被使用。
+如果输出包含类似于以下的行，那么 grub 在 UEFI 模式下被使用。
+Boot0005* proxmox [...] File(\EFI\proxmox\grubx64.efi)
+如果输出包含类似于以下的行，那么 systemd-boot 被使用。
+Boot0006* Linux Boot Manager [...] File(\EFI\systemd\systemd-bootx64.efi -
+)
+通过运行：
+proxmox-boot-tool status
+您可以找出 proxmox-boot-tool 是否被配置，这是判断系统如何启动的一个很好的指标。
 
+3.12.4 Grub
+grub 多年来一直是启动 Linux 系统的事实标准，并有很好的文档支持7。
+7Grub 手册 https://www.gnu.org/software/grub/manual/grub/grub.html
+配置
+对 grub 配置的更改是通过默认文件 /etc/default/grub 或者配置片段 /etc/default/grub.d 完成的。更改配置后，运行以下命令以重新生成配置文件：
+8
+update-grub
 
+3.12.5 Systemd-boot
+systemd-boot 是一个轻量级的 EFI 引导加载程序。它直接从安装它的 EFI 服务分区（ESP）读取内核和 initrd 映像。直接从 ESP 
+加载内核的主要优点是它不需要重新实现访问存储的驱动程序。在 Proxmox VE 中，proxmox-boot-tool（参见第 3.12.2 节）用于保持 ESPs 上的配置同步。
+配置
+systemd-boot 通过 EFI 系统分区（ESP）的根目录中的文件 loader/loader.conf 进行配置。详情请参阅 loader.conf(5) 手册页。
+每个引导加载程序条目都放在目录 loader/entries/ 的单独文件中。
+一个 example entry.conf 如下所示（/ 指的是 ESP 的根目录）：
+title Proxmox
+version 5.0.15-1-pve
+options root=ZFS=rpool/ROOT/pve-1 boot=zfs
+linux /EFI/proxmox/5.0.15-1-pve/vmlinuz-5.0.15-1-pve
+initrd /EFI/proxmox/5.0.15-1-pve/initrd.img-5.0.15-1-pve
 
+3.12.6 编辑内核命令行
+你可以在以下位置修改内核命令行，取决于使用的引导加载程序：
+Grub
+内核命令行需要放在文件 /etc/default/grub 中的变量 GRUB_CMDLINE_LINUX_DEFAULT 中。运行 update-grub 将其内容附加到 /boot/grub/grub 中的所有 linux 条目。
+Systemd-boot
+内核命令行需要放在 /etc/kernel/cmdline 中的一行中。要应用更改，请运行 proxmox-boot-tool refresh，该命令将其设置为 loader/entries/proxmox-*.conf 
+中所有配置文件的选项行。
+8使用 proxmox-boot-tool 的系统将在 update-grub 时调用 proxmox-boot-tool refresh。
 
+3.12.7 覆盖下一次启动的内核版本
+要选择当前未默认的内核，你可以：
+• 使用启动过程开始时显示的引导加载程序菜单
+• 使用 proxmox-boot-tool 将系统固定到一个内核版本，可以是一次性的或永久的（直到解除固定）。
+这应该帮助你解决新内核版本与硬件之间的不兼容问题。
+注意
+这样的固定应尽快移除，以便最新内核的所有当前安全补丁也能应用到系统上。
+例如：要永久选择版本 5.15.30-1-pve 作为启动，你需要运行：
+proxmox-boot-tool kernel pin 5.15.30-1-pve
+提示
+固定功能适用于所有 Proxmox VE 系统，不仅仅是那些使用 proxmox-boot-tool 同步 ESP 内容的系统，如果你的系统不使用 proxmox-boot-tool 进行同步，
+你也可以跳过最后的 proxmox-boot-tool refresh 调用。
+你也可以设置一个内核版本只在下次系统启动时启动。例如，这对于测试更新后的内核是否解决了一个问题非常有用，这个问题最初导致你固定一个版本：
+proxmox-boot-tool kernel pin 5.15.30-1-pve --next-boot
+要删除任何固定版本配置，请使用 unpin 子命令：
+proxmox-boot-tool kernel unpin
+虽然 unpin 也有一个 --next-boot 选项，但它是用来清除使用 --next-boot 设置的固定版本。由于在启动时已经自动发生，手动调用它的用处不大。
+在设置或清除固定版本后，你还需要通过运行 refresh 子命令来同步 ESP 上的内容和配置。
+提示
+如果你以交互方式调用工具，将提示你自动执行 proxmox-boot-tool 管理的系统。
+proxmox-boot-tool refresh
 
+3.13 内核同页合并 (KSM)
+内核同页合并 (Kernel Samepage Merging，KSM) 是 Linux 内核提供的一种可选内存重复数据删除功能，它在 Proxmox VE 中默认启用。KSM 
+通过扫描一系列物理内存页的内容进行工作，识别映射到它们的虚拟页面。如果找到相同的页面，相应的虚拟页面会被重新映射，使它们都指向同一物理页面，旧的页面被释放。
+虚拟页面被标记为 "写时复制"，这样对它们的任何写入都将写入新的内存区域，保留共享的物理页面不变。
 
+3.13.1 KSM的影响
+KSM 可以在虚拟化环境中优化内存使用，因为运行相似操作系统或工作负载的多个虚拟机可能会共享许多常见的内存页面。
+然而，尽管 KSM 可以减少内存使用，但它也带来一些安全风险，因为它可能会将虚拟机暴露给旁路攻击。研究表明，通过利用 KSM 
+的某些特性，可以通过在同一主机上的第二个虚拟机推断出关于正在运行的虚拟机的信息。
+因此，如果你正在使用 Proxmox VE 提供托管服务，你应该考虑禁用 KSM，以便为你的用户提供额外的安全性。此外，你应该检查你国家的法规，因为禁用 KSM 可能是法律要求。
 
-
-
+3.13.2 禁用 KSM
+要查看 KSM 是否激活，你可以检查以下输出：
+systemctl status ksmtuned
+如果已启用，可以立即禁用：
+systemctl disable --now ksmtuned
+最后，要解除所有当前合并的页面，运行：
+echo 2 > /sys/kernel/mm/ksm/run
 
 
 
