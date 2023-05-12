@@ -1,2 +1,626 @@
 proxmox7-4-5
 
+第5章
+集群管理器
+
+Proxmox VE集群管理器pvecm是一个用来创建物理服务器组的工具。这样的组被称为集群。我们使用Corosync集群引擎进行可靠的组通信。
+集群中节点的数量没有明确的限制。实际上，可能的节点数量可能受到主机和网络性能的限制。目前（2021年），有报告显示在生产中有超过50个节点的集群（使用高端企业硬件）。
+pvecm可用于创建新的集群，将节点加入到集群，离开集群，获取状态信息，以及执行各种其他与集群相关的任务。
+Proxmox集群文件系统（“pmxcfs”）被用来将集群配置透明地分布到所有的集群节点。
+将节点分组成一个集群有以下优点：
+    集中的，基于web的管理
+    多主集群：每个节点都可以执行所有的管理任务
+    使用pmxcfs，一个数据库驱动的文件系统，用于存储配置文件，通过corosync在所有节点上实时复制
+    虚拟机和容器之间的易于迁移
+    快速部署
+    集群范围的服务，如防火墙和HA
+
+5.1 要求
+    所有节点必须能够通过UDP端口5405-5412相互连接，以便corosync工作。
+    日期和时间必须同步。
+    节点之间需要在TCP端口22上建立SSH隧道。
+    如果你对高可用性感兴趣，你需要至少有三个节点才能实现可靠的仲裁。所有节点应该有相同的版本。
+    我们建议为集群流量使用专用的网络接口控制器（NIC），特别是如果你使用的是共享存储。
+• 添加节点时需要集群节点的root密码。
+• 只有当节点的CPU来自同一供应商时，才支持虚拟机的在线迁移。其他情况下可能也能工作，但这永远无法保证。
+注意
+不可能将Proxmox VE 3.x及更早版本与Proxmox VE 4.X集群节点混合。
+注意
+虽然可以混合使用Proxmox VE 4.4和Proxmox VE 5.0节点，但这样做并不被支持作为生产配置，只应在从一个主版本升级到另一个主版本的整个集群过程中临时使用。
+注意
+使用早期版本的Proxmox VE 6.x运行集群是不可能的。Proxmox VE 6.x和早期版本之间的集群协议（corosync）发生了根本性的变化。
+Proxmox VE 5.4的corosync 3包只是为了升级到Proxmox VE 6.0的过程。
+
+5.2 准备节点
+首先，在所有节点上安装Proxmox VE。确保每个节点都安装了最终的主机名和IP配置。在创建集群后，无法更改主机名和IP。
+虽然通常在/etc/hosts中引用所有节点名和它们的IP（或通过其他方式使它们的名字可以解析），但这对集群的运行并不是必需的。然而，这可能很有用，
+因为你可以通过SSH从一个节点连接到另一个节点，使用更容易记住的节点名（也可参见链接地址类型第5.7.3节）。请注意，我们总是建议在集群配置中通过IP地址引用节点。
+
+5.3 创建集群
+你可以在控制台上创建一个集群（通过ssh登录），或者通过使用Proxmox VE web界面的API（数据中心！集群）。
+注意
+为你的集群使用一个唯一的名字。这个名字后来不能被更改。集群名字遵循和节点名字相同的规则。
+在Datacenter!Cluster下，点击Create Cluster。输入集群名，并从下拉列表中选择一个网络连接作为主集群网络（Link 0）。默认为通过节点主机名解析的IP。
+从Proxmox VE 6.2开始，可以添加多达8个备用链接到一个集群。要添加一个冗余链接，点击Add按钮，从各自的字段中选择一个链接编号和IP地址。在Proxmox VE 
+6.2之前，要添加第二个链接作为备用，你可以选择Advanced复选框并选择一个额外的网络接口（Link 1，参见Corosync Redundancy Section 5.8）。
+注意
+确保选择用于集群通信的网络不用于任何高流量目的，如网络存储或实时迁移。虽然集群网络本身产生的数据量很小，但它对延迟非常敏感。查看完整的集群网络需求第5.7.1节。
+
+5.3.2 通过命令行创建
+通过ssh登录到第一个Proxmox VE节点，运行以下命令：
+hp1# pvecm create CLUSTERNAME
+要检查新集群的状态，使用：
+hp1# pvecm status
+
+5.3.3 在同一网络中的多个集群
+可以在同一个物理或逻辑网络中创建多个集群。在这种情况下，每个集群必须有一个唯一的名字，以避免可能在集群通信堆栈中产生冲突。此外，这有助于通过使集群清晰可区分，避免人为的混淆。
+虽然corosync集群的带宽需求相对较低，但是包的延迟和每秒包（PPS）速率是限制因素。
+同一网络中的不同集群可以竞争这些资源，因此对于较大的集群，使用单独的物理网络基础设施可能仍然有意义。
+
+5.4 将节点添加到集群
+警告
+当加入集群时，/etc/pve中的所有现有配置将被覆盖。特别是，加入的节点不能拥有任何客户端，因为否则客户端ID可能会产生冲突，且节点将继承集群的存储配置。
+要加入带有现有客户端的节点，作为一种解决方法，你可以为每个客户端创建一个备份（使用vzdump），并在加入后使用不同的ID恢复。
+如果节点的存储布局有所不同，你将需要重新添加节点的存储，并调整每个存储的节点限制，以反映存储实际可用的节点。
+
+5.4.1 通过GUI将节点加入到集群
+登录到现有集群节点的web界面。在Datacenter ! Cluster下，点击顶部的Join Information按钮。然后，点击Copy Information按钮。或者，手动从Information字段复制字符串。
+接下来，登录到你想要添加的节点的web界面。在Datacenter ! Cluster下，点击Join Cluster。用你之前复制的Join 
+Information文本填充Information字段。加入集群所需的大多数设置将自动填充。出于安全原因，必须手动输入集群密码。
+注意
+要手动输入所有必需的数据，你可以取消选择Assisted Join复选框。
+点击Join按钮后，集群加入过程将立即开始。在节点加入集群后，其当前的节点证书将被集群证书颁发机构（CA）签发的证书替换。
+这意味着当前的会话将在几秒钟后停止工作。然后，你可能需要强制重新加载web界面，并使用集群凭据再次登录。
+现在，你的节点应该在Datacenter ! Cluster下可见。
+
+5.4.2 通过命令行将节点加入到集群
+通过ssh登录到你想要加入到现有集群的节点。
+pvecm add IP-ADDRESS-CLUSTER
+对于IP-ADDRESS-CLUSTER，使用现有集群节点的IP或主机名。建议使用IP地址（参见链接地址类型第5.7.3节）。
+要检查集群的状态，使用：
+pvecm status
+添加4个节点后的集群状态
+# pvecm status
+Cluster information
+~~~~~~~~~~~~~~~~~~~
+Name: prod-central
+Config Version: 3
+Transport: knet
+Secure auth: on
+Quorum information
+~~~~~~~~~~~~~~~~~~
+Date: Tue Sep 14 11:06:47 2021
+Quorum provider: corosync_votequorum
+Nodes: 4
+Node ID: 0x00000001
+Ring ID: 1.1a8
+Quorate: Yes
+Votequorum information
+~~~~~~~~~~~~~~~~~~~~~~
+Expected votes: 4
+Highest expected: 4
+Total votes: 4
+Quorum: 3
+Flags: Quorate
+Membership information
+~~~~~~~~~~~~~~~~~~~~~~
+Nodeid Votes Name
+0x00000001 1 192.168.15.91
+0x00000002 1 192.168.15.92 (local)
+0x00000003 1 192.168.15.93
+0x00000004 1 192.168.15.94
+如果你只想列出所有的节点，使用：
+# pvecm nodes
+在集群中列出节点
+# pvecm nodes
+Membership information
+~~~~~~~~~~~~~~~~~~~~~~
+Nodeid Votes Name
+1 1 hp1
+2 1 hp2 (local)
+3 1 hp3
+4 1 hp4
+
+5.4.3 添加有独立集群网络的节点
+当将节点添加到具有独立集群网络的集群时，你需要使用link0参数设置该网络上的节点地址：
+pvecm add IP-ADDRESS-CLUSTER -link0 LOCAL-IP-ADDRESS-LINK0
+如果你想使用Kronosnet传输层的内置冗余（第5.8节），也使用link1参数。
+使用GUI，你可以从集群加入对话框中相应的Link X字段中选择正确的接口。
+
+5.5 删除集群节点
+警告
+在进行操作之前，请仔细阅读程序，因为它可能并不是你想要或需要的。
+将所有虚拟机从节点移除。确保你已经复制了任何你想保留的本地数据或备份。此外，确保删除任何计划的复制任务到要被删除的节点。
+警告
+在删除节点之前未能删除到节点的复制任务，将导致复制任务无法删除。特别注意，如果迁移了被复制的VM，复制会自动切换方向，
+所以通过从要删除的节点迁移被复制的VM，将自动向该节点设置复制任务。
+在以下示例中，我们将从集群中删除节点hp4。
+登录到一个不同的集群节点（不是hp4），并发出pvecm nodes命令来识别要删除的节点ID：
+hp1# pvecm nodes
+Membership information
+~~~~~~~~~~~~~~~~~~~~~~
+Nodeid Votes Name
+1 1 hp1 (local)
+2 1 hp2
+3 1 hp3
+4 1 hp4
+在这一点上，你必须关闭hp4并确保它不会再次启动（在网络中）使用其当前的配置。
+重要
+如上所述，关键是在移除节点前关闭它，并确保它不会再次启动（在现有的集群网络中）使用其当前的配置。如果你按原样启动节点，集群可能会出问题，恢复到正常状态可能会很困难。
+关闭节点hp4后，我们可以安全地将其从集群中移除。
+hp1# pvecm delnode hp4
+Killing node 4
+注意
+此时，你可能会收到一个错误消息，表示无法杀死节点（错误 = CS_ERR_NOT_EXIST）。这并不表示删除节点实际上失败，而是corosync试图杀死一个离线节点失败。
+因此，它可以被安全地忽略。使用pvecm nodes或pvecm status再次检查节点列表。它应该看起来像这样：
+hp1# pvecm status
+...
+Votequorum information
+~~~~~~~~~~~~~~~~~~~~~~
+Expected votes: 3
+Highest expected: 3
+Total votes: 3
+Quorum: 2
+Flags: Quorate
+Membership information
+~~~~~~~~~~~~~~~~~~~~~~
+Nodeid Votes Name
+0x00000001 1 192.168.15.90 (local)
+0x00000002 1 192.168.15.91
+0x00000003 1 192.168.15.92
+如果出于任何原因，你希望此服务器再次加入同一集群，你必须：
+• 在其上重新安装Proxmox VE，
+• 然后按照前一节的说明将其加入。
+注意
+在移除节点后，其SSH指纹仍将存在于其他节点的known_hosts中。如果在重新加入具有相同IP或主机名的节点后收到SSH错误，请在重新添加的节点上运行一次pvecm 
+updatecerts来更新其在整个集群中的指纹。
+
+5.5.1 不重新安装就分离节点
+警告
+这不是推荐的方法，请谨慎操作。如果你不确定，使用前一种方法。
+你也可以在不从头开始重新安装的情况下将节点从集群中分离。但是，在从集群中移除节点后，它仍然可以访问任何共享存储。在开始从集群中移除节点之前，必须解决这个问题。
+一个Proxmox VE集群不能与另一个集群共享完全相同的存储，因为存储锁定不能跨集群边界工作。此外，它可能还会导致VMID冲突。
+建议你创建一个新的存储，只有你想要分离的节点才能访问。这可以是你的NFS上的新导出或新的Ceph池，仅举几个例子。只是重要的是，完全相同的存储不能被多个集群访问。
+设置这个存储后，将所有数据和虚拟机从节点移动到它。然后你就可以从集群中分离节点了。
+警告
+确保所有共享资源都被清理地分离！否则你会遇到冲突和问题。
+首先，停止节点上的corosync和pve-cluster服务：
+systemctl stop pve-cluster
+systemctl stop corosync
+再次以本地模式启动集群文件系统：
+pmxcfs -l
+删除corosync配置文件：
+rm /etc/pve/corosync.conf
+rm -r /etc/corosync/*
+现在你可以再次启动文件系统作为一个正常的服务：
+killall pmxcfs
+systemctl start pve-cluster
+现在节点已经从集群中分离。你可以在集群的任何剩余节点上删除它，使用：
+pvecm delnode oldnode
+如果命令因剩余节点中的仲裁丧失而失败，你可以将预期的投票设置为1以作为解决方法：
+pvecm expected 1
+然后重复pvecm delnode命令。
+现在切换回已分离的节点，删除其上的所有剩余集群文件。这确保了节点可以在没有问题的情况下再次被添加到另一个集群。
+rm /var/lib/corosync/*
+由于其他节点的配置文件仍在集群文件系统中，你可能也想清理这些。在绝对确定你有正确的节点名后，你可以从/etc/pve/nodes/NODENAME递归地删除整个目录。
+警告
+节点的SSH密钥将保留在authorized_key文件中。这意味着节点仍然可以使用公钥认证相互连接。你应该通过从/etc/pve/priv/authorized_keys文件中删除相应的密钥来解决这个问题。
+
+5.6 仲裁
+Proxmox VE使用基于仲裁的技术来在所有集群节点之间提供一致的状态。
+仲裁是一个分布式事务必须获得的最少投票数，以便在分布式系统中执行操作。
+— 来自维基百科 Quorum (distributed computing)
+在网络分区的情况下，状态改变需要大多数节点在线。如果集群失去仲裁，它将切换到只读模式。
+注意
+Proxmox VE默认为每个节点分配一个投票。
+
+5.7 集群网络
+集群网络是集群的核心。所有通过它发送的消息都必须按照各自的顺序可靠地传送到所有节点。在Proxmox 
+VE中，这部分工作由corosync完成，corosync是一种高性能、低开销、高可用性开发工具包的实现。它服务于我们的分布式配置文件系统(pmxcfs)。
+
+5.7.1 网络要求
+Proxmox VE集群堆栈需要所有节点之间延迟低于5毫秒（局域网性能）的可靠网络才能稳定运行。
+虽然在小节点计数的设置上，高延迟的网络可能会工作，但这并不保证，并且在超过三个节点且延迟在10毫秒左右的情况下，这种可能性就比较小了。
+网络不应被其他成员过度使用，因为虽然corosync不使用大量带宽，但它对延迟抖动敏感；理想情况下，corosync应在其自己的物理隔离网络上运行。
+尤其是不要对corosync和存储使用共享网络（除非作为冗余Section 5.8配置中的低优先级后备）。
+在设置集群之前，最好检查网络是否适合这个目的。为确保节点可以在集群网络上相互连接，你可以使用ping工具测试它们之间的连通性。
+如果启用了Proxmox VE防火墙，将自动生成corosync的ACCEPT规则 - 不需要手动操作。
+注意
+Corosync在版本3.0之前使用了多播（在Proxmox VE 6.0中引入）。现代版本依赖于Kronosnet进行集群通信，目前只支持常规的UDP单播。
+警告
+你仍然可以通过在corosync.conf Section 5.11.1中将传输设置为udp或udpu来启用多播或遗留单播，但请记住，这将禁用所有的加密和冗余支持。因此，不建议这样做。
+
+5.7.2 单独的集群网络
+在没有任何参数的情况下创建集群时，corosync集群网络通常与web界面和VM网络共享。根据你的设置，甚至可能将存储流量发送到同一网络上。
+建议改变这一点，因为corosync是一个时间敏感的实时应用程序。
+设置新的网络
+首先，你需要设置一个新的网络接口。它应该在一个物理隔离的网络上。确保你的网络满足集群网络要求Section 5.7.1。
+在创建集群时分离
+通过pvecm 
+create命令的linkX参数，可以在创建新集群时实现分离。
+如果你已经在10.10.10.1/25设置了一个具有静态地址的附加NIC，并且想要通过这个接口发送和接收所有的集群通信，你可以执行：
+pvecm create test --link0 10.10.10.1
+要检查一切是否正常工作，执行：
+systemctl status corosync
+之后，按照上述描述继续，将带有分离的集群网络的节点添加到集群中（第5.4.3节）。
+在创建集群后分离
+如果你已经创建了一个集群，并希望将其通信切换到另一个网络，而不需要重建整个集群，你可以这样做。
+这种变化可能会导致集群中短时间的法定人数丧失，因为节点必须重启corosync，并在新网络上一个接一个地启动。
+首先，检查如何编辑corosync.conf文件（第5.11.1节）。然后，打开它，你应该看到一个类似于以下的文件：
+logging {
+debug: off
+to_syslog: yes
+}
+nodelist {
+node {
+name: due
+nodeid: 2
+quorum_votes: 1
+ring0_addr: due
+}
+node {
+name: tre
+nodeid: 3
+quorum_votes: 1
+ring0_addr: tre
+}
+node {
+name: uno
+nodeid: 1
+quorum_votes: 1
+ring0_addr: uno
+}
+}
+quorum {
+provider: corosync_votequorum
+}
+totem {
+cluster_name: testcluster
+config_version: 3
+ip_version: ipv4-6
+secauth: on
+version: 2
+interface {
+linknumber: 0
+}
+}
+注意
+ringX_addr实际上指定了一个corosync链接地址。"ring"这个名字是旧版本corosync的遗留物，为了向后兼容而保留下来。
+首先，你要做的是在节点条目中添加name属性，如果你还没有看到它们。这些必须匹配节点名称。
+然后，将所有节点的ring0_addr属性中的所有地址替换为新地址。你可以在这里使用纯IP地址或主机名。如果你使用主机名，
+请确保它们可以从所有节点解析（另请参见链接地址类型第5.7.3节）。
+在这个例子中，我们希望将集群通信切换到10.10.10.1/25网络，所以我们分别更改每个节点的ring0_addr。
+注意
+同样的程序也可以用来更改其他的ringX_addr值。然而，我们建议一次只更改一个链接地址，这样如果出现问题，恢复起来会更容易。
+在我们增加config_version属性之后，新的配置文件应该看起来像这样：
+logging {
+debug: off
+to_syslog: yes
+}
+nodelist {
+node {
+name: due
+nodeid: 2
+quorum_votes: 1
+ring0_addr: 10.10.10.2
+}
+node {
+name: tre
+nodeid: 3
+quorum_votes: 1
+ring0_addr: 10.10.10.3
+}
+node {
+name: uno
+nodeid: 1
+quorum_votes: 1
+ring0_addr: 10.10.10.1
+}
+}
+quorum {
+provider: corosync_votequorum
+}
+totem {
+cluster_name: testcluster
+config_version: 4
+ip_version: ipv4-6
+secauth: on
+version: 2
+interface {
+linknumber: 0
+}
+}
+然后，在最后检查一遍所有改变的信息是否正确后，我们保存它，然后再次按照编辑corosync.conf文件第5.11.1节的内容，使其生效。
+更改将实时应用，因此并不严格需要重启corosync。如果你也更改了其他设置，或者注意到corosync在抱怨，你可以选择触发重启。
+在单个节点上执行：
+systemctl restart corosync
+现在检查一切是否正常：
+systemctl status corosync
+如果corosync开始再次工作，也在所有其他节点上重启它。然后它们会在新网络上逐一加入集群成员。
+
+5.7.3 Corosync地址
+corosync链接地址（在corosync.conf中用ringX_addr表示，为了向后兼容）可以有两种方式指定：
+• 可以直接使用IPv4/v6地址。它们是推荐的，因为它们是静态的，通常不会轻易更改。
+• 主机名将使用getaddrinfo解析，这意味着默认情况下，如果可用，将首先使用IPv6地址（另请参见man gai.conf）。特别是在将现有集群升级到IPv6时，请记住这一点。
+警告
+使用主机名应谨慎，因为它们解析到的地址可以在不接触corosync或运行它的节点的情况下更改-这可能导致一个地址被更改而没有考虑到对corosync的影响。
+如果更喜欢使用主机名，建议使用专门为corosync设定的独立、静态的主机名。此外，确保集群中的每个节点都能正确解析所有主机名。
+自Proxmox VE 5.1版本开始，虽然支持，但主机名将在输入时解析。只有解析的IP被保存到配置中。
+在早期版本上加入集群的节点可能在corosync.conf中仍然使用未解析的主机名。可能更好的主意是，如上所述，用IP或单独的主机名替换它们。
+
+5.8 Corosync冗余
+Corosync默认通过其集成的Kronosnet层支持冗余网络（在旧版udp/udpu传输上不支持）。可以通过指定多个链接地址来启用它，无论是通过pvecm的--linkX参数，在GUI中作为Link 1（在创建集群或添加新节点时），还是在corosync.conf中指定多个ringX_addr。
+注意
+为了提供有用的故障切换，每个链接应在其自己的物理网络连接上。
+链接的使用根据优先级设置。你可以通过在corosync.conf的相应接口部分设置knet_link_priority，或者，更好的是，在用pvecm创建你的集群时使用priority参数来配置这个优先级：
+pvecm create CLUSTERNAME --link0 10.10.10.1,priority=15 --link1 - 10.20.20.1,priority=20
+这将导致首先使用link1，因为它的优先级更高。
+如果没有手动配置优先级（或者两个链接有相同的优先级），链接将按照它们的数字顺序使用，数字较小的优先级更高。
+即使所有的链接都在工作，只有优先级最高的一个会看到corosync的流量。链接优先级不能混合，这意味着不同优先级的链接将无法相互通信。
+由于优先级较低的链接除非所有优先级较高的链接失败，否则不会看到流量，所以将用于其他任务（虚拟机，存储等）的网络指定为低优先级链接成为一种有用的策略。
+在最坏的情况下，高延迟或更拥堵的连接可能比没有连接要好。
+
+5.8.1 向现有集群添加冗余链接
+要向正在运行的配置添加新的链接，首先检查如何编辑corosync.conf文件第5.11.1节
+最后，在你的totem部分添加一个新的接口，如下所示，将X替换为上面选择的链接号码。
+假设你添加了一个链接号码为1的链接，新的配置文件可能看起来像这样：
+logging {
+debug: off
+to_syslog: yes
+}
+nodelist {
+node {
+name: due
+nodeid: 2
+quorum_votes: 1
+ring0_addr: 10.10.10.2
+ring1_addr: 10.20.20.2
+}
+node {
+name: tre
+nodeid: 3
+quorum_votes: 1
+ring0_addr: 10.10.10.3
+ring1_addr: 10.20.20.3
+}
+node {
+name: uno
+nodeid: 1
+quorum_votes: 1
+ring0_addr: 10.10.10.1
+ring1_addr: 10.20.20.1
+}
+}
+quorum {
+provider: corosync_votequorum
+}
+totem {
+cluster_name: testcluster
+config_version: 4
+ip_version: ipv4-6
+secauth: on
+version: 2
+interface {
+linknumber: 0
+}
+interface {
+linknumber: 1
+}
+}
+只要你按照最后的步骤编辑corosync.conf文件第5.11.1节，新的链接就会被启用。
+重启应该不是必要的。你可以检查corosync是否加载了新的链接，使用：
+journalctl -b -u corosync
+测试新链接可能是个好主意，可以通过在一个节点上临时断开旧链接，并确保其在断开连接时状态仍然在线：
+pvecm status
+如果你看到一个健康的集群状态，那就意味着你的新链接正在被使用。
+
+5.9 Proxmox VE 集群中SSH的作用
+Proxmox VE 利用 SSH 隧道进行各种功能。
+• 代理控制台/ shell 会话（节点和客户端）
+当使用节点 B 的 shell，同时连接到节点 A，连接到节点 A 的一个终端代理，该代理反过来通过非交互式 SSH 隧道连接到节点 B 的登录 shell。
+• 安全模式下的 VM 和 CT 内存和本地存储迁移。
+在迁移期间，源节点和目标节点之间建立一个或多个 SSH 隧道，以交换迁移信息和传输内存和磁盘内容。
+• 存储复制
+由于自动执行 .bashrc 和兄弟文件的陷阱
+如果你有一个自定义的 .bashrc，或者类似的文件在配置的 shell 登录时执行，ssh 将在会话成功建立后自动运行它。
+这可能导致一些意想不到的行为，因为这些命令可能在上述任何操作中以 root 权限执行。这可能引起可能的问题副作用！
+为了避免这种复杂情况，建议在 /root/.bashrc 中添加一个检查，确保会话是交互式的，然后再运行 .bashrc 命令。
+你可以在你的 .bashrc 文件的开头添加这个片段：
+如果不是交互式运行则提前退出，以避免副作用！
+case $- in
+i) ;;
+*) return;;
+esac
+
+5.10 Corosync 外部投票支持
+本节描述了在 Proxmox VE 集群中部署外部投票者的方法。当配置后，集群可以在不违反集群通信的安全属性的情况下，承受更多的节点故障。
+为了实现这个目标，涉及到两个服务：
+• 每个 Proxmox VE 节点上运行的 QDevice 守护程序
+• 在独立服务器上运行的外部投票守护程序
+因此，你可以在较小的设置（例如 2+1 节点）中实现更高的可用性。
+
+5.10.1 QDevice 技术概述
+Corosync Quorum Device (QDevice) 是一个在每个集群节点上运行的守护程序。它根据外部运行的第三方仲裁者的决定，向集群的 quorum 
+子系统提供配置的投票数。它的主要用途是允许一个集群比标准 quorum 
+规则允许的情况下承受更多的节点故障。这可以安全地完成，因为外部设备可以看到所有节点，因此只选择一组节点给予其投票。
+只有在这组节点在接收到第三方投票后可以再次拥有 quorum 的情况下，才会这样做。
+目前，只有 QDevice Net 作为第三方仲裁者得到支持。这是一个守护程序，如果它可以通过网络到达分区成员，就会向集群分区提供投票。
+它只会在任何时候给集群的一个分区投票。它被设计为支持多个集群，几乎没有配置和状态。新的集群是动态处理的，运行 QDevice 的主机上不需要配置文件。
+外部主机的唯一要求是需要网络访问集群，并有一个 corosync-qnetd 包可用。我们为基于 Debian 的主机提供了一个包，其他 Linux 发行版也应该通过各自的包管理器有一个包可用。
+注意
+与 corosync 本身不同，QDevice 通过 TCP/IP 连接到集群。守护程序也可以在集群的 LAN 外部运行，并不受 corosync 的低延迟要求限制。
+
+5.10.2 支持的设置
+我们支持具有偶数节点的集群的 QDevices，并推荐 2 节点集群使用它，如果它们应该提供更高的可用性。
+对于具有奇数节点的集群，我们目前不建议使用 QDevices。这是因为 QDevice 为每个集群类型提供的投票的差异。偶数集群得到一个额外的投票，只增加了可用性，因为如果 QDevice 
+本身失败，你就处于没有 QDevice 的情况下。
+另一方面，对于奇数的集群大小，QDevice 提供了 (N-1) 票——其中 N 对应于集群节点数。这种替代行为是有道理的；如果它只有一个额外的投票，集群可能会陷
+进入分脑情况。这种算法允许除了一个节点（和自然的 QDevice 本身）以外的所有节点都可以失败。然而，这有两个缺点：
+    如果 QNet 守护程序本身失败，其他任何节点都不能失败，否则集群立即失去 quorum。例如，在一个有 15 个节点的集群中，可以有 7 个节点在集群变得不能进行 quorum 
+    之前失败。但是，如果在这里配置了 QDevice，而它本身失败，那么 15 个节点中没有一个节点可以失败。在这种情况下，QDevice 几乎就像是一个单点故障。
+    所有节点除了一个加上 QDevice 可以失败的事实听起来很有前途，但是这可能导致 HA 服务的大规模恢复，这可能会让剩下的单个节点负载过重。此外，如果只有 ((N-1)/2) 
+    个或更少的节点保持在线，Ceph 服务器将停止提供服务。
+如果你理解了这些缺点和含义，你可以自己决定是否要在奇数节点的集群设置中使用这项技术。
+
+5.10.3 QDevice-Net 设置
+我们建议将为 corosync-qdevice 提供投票的任何守护程序作为非特权用户运行。Proxmox VE 和 Debian 提供了一个已经配置好的包。
+守护程序和集群之间的通信必须加密，以确保 QDevice 在 Proxmox VE 中的安全集成。
+首先，在你的外部服务器上安装 corosync-qnetd 包
+external# apt install corosync-qnetd
+然后在所有集群节点上安装 corosync-qdevice 包
+pve# apt install corosync-qdevice
+做完这些后，确保集群中的所有节点都在线。
+你现在可以在 Proxmox VE 节点之一上运行以下命令来设置你的 QDevice：
+pve# pvecm qdevice setup <QDEVICE-IP>
+集群的 SSH 密钥将自动复制到 QDevice。
+注意
+如果在此步骤中被要求输入密码，请确保你的外部服务器的 SSH 配置允许通过密码进行 root 登录。
+如果在这个阶段收到诸如 "Host key verification failed." 的错误，运行 pvecm updatecerts 可能会解决问题。
+在输入密码并成功完成所有步骤后，你将看到 "Done"。你可以用以下命令验证 QDevice 已经设置好：
+pve# pvecm status
+...
+Votequorum information
+~~~~~~~~~~~~~~~~~~~~~
+Expected votes: 3
+Highest expected: 3
+Total votes: 3
+Quorum: 2
+Flags: Quorate Qdevice
+Membership information
+~~~~~~~~~~~~~~~~~~~~~~
+Nodeid Votes Qdevice Name
+0x00000001 1 A,V,NMW 192.168.22.180 (local)
+0x00000002 1 A,V,NMW 192.168.22.181
+0x00000000 1 Qdevice
+
+5.10.4 常见问题解答
+平局决断
+在出现平局的情况下，两个同样大小的集群分区无法看到对方，但可以看到 QDevice，QDevice 会随机选择这些分区中的一个并向其提供投票。
+可能的负面影响
+对于节点数为偶数的集群，在使用 QDevice 时没有负面影响。如果它无法工作，那就跟根本没有 QDevice 是一样的。
+在 QDevice 设置后添加/删除节点
+如果你想在 QDevice 设置的集群中添加新节点或删除现有节点，你需要先移除 
+QDevice。之后，你可以正常地添加或删除节点。一旦你再次有一个节点数为偶数的集群，你可以按照之前的描述再次设置 QDevice。
+移除 QDevice
+如果你使用了官方的 pvecm 工具来添加 QDevice，你可以通过运行以下命令来移除它：
+pve# pvecm qdevice remove
+
+5.11 Corosync 配置
+/etc/pve/corosync.conf 文件在 Proxmox VE 集群中起着中心作用。它控制集群的成员关系和网络。有关更多信息，请查看 corosync.conf man 页面：
+man corosync.conf
+对于节点成员关系，你应该始终使用 Proxmox VE 提供的 pvecm 工具。对于其他更改，你可能需要手动编辑配置文件。以下是一些最佳实践提示。
+
+5.11.1 编辑 corosync.conf
+编辑 corosync.conf 文件并不总是很直接。在每个集群节点上都有两个，一个在 /etc/pve/corosync.conf，另一个在 /etc/corosync/
+corosync.conf。编辑我们的集群文件系统中的一个将把更改传播到本地的一个，但反之则不然。
+配置将在文件更改后自动更新。这意味着可以在运行中的 corosync 中集成的更改将立即生效。因此，你应该始终创建一个副本并编辑它，以避免在编辑时保存文件触发意外更改。
+cp /etc/pve/corosync.conf /etc/pve/corosync.conf.new
+然后，使用你最喜欢的编辑器打开配置文件，如 nano 或 vim.tiny，它们都预装在每个 Proxmox VE 节点上。
+注意
+在配置更改后，总是增加 config_version 数字；省略此步可能导致问题。
+在进行必要的更改后，创建当前工作配置文件的另一份副本。如果新配置无法应用或导致其他问题，这可以作为备份。
+cp /etc/pve/corosync.conf /etc/pve/corosync.conf.bak
+然后用新的配置文件替换旧的配置文件：
+mv /etc/pve/corosync.conf.new /etc/pve/corosync.conf
+你可以使用以下命令检查是否可以自动应用更改：
+systemctl status corosync
+journalctl -b -u corosync
+如果更改无法自动应用，你可能需要通过以下方式重启 corosync 服务：
+systemctl restart corosync
+在出错时，请检查下面的故障排除部分。
+
+5.11.2 故障排除
+问题：必须配置 quorum.expected_votes
+当 corosync 开始失败，你在系统日志中得到以下消息：
+[...]
+corosync[1647]: [QUORUM] Quorum provider: corosync_votequorum failed to -
+initialize.
+corosync[1647]: [SERV ] Service engine ’corosync_quorum’ failed to load -
+for reason
+’configuration error: nodelist or quorum.expected_votes must be -
+configured!’
+[...]
+这意味着你在配置中为 corosync ringX_addr 设置的主机名无法解析。
+在非法人数状态下写入配置
+如果你需要在没有法人数的节点上更改 /etc/pve/corosync.conf，并且你知道你在做什么，使用：
+pvecm expected 1
+这将预期的投票数设为 1，并使集群达到法人数。然后你可以修复你的配置，或将其恢复到最后一次工作的备份。
+如果 corosync 无法再次启动，这还不够。在这种情况下，最好编辑 /etc/corosync/corosync.conf 中的本地 corosync 配置副本，以便 corosync 
+可以再次启动。确保在所有节点上，此配置具有相同的内容，以避免脑裂情况。
+
+5.11.3 Corosync 配置词汇表
+ringX_addr
+这是 Kronosnet 连接节点之间的不同链路地址的名称。
+
+5.12 集群冷启动
+当所有节点都离线时，显然集群不是法定人数。这是在电力故障后的常见情况。
+注意
+使用不间断电源（“UPS”，也称为“电池备用”）总是一个好主意，以避免这种状态，特别是如果你想要高可用性。
+在节点启动时，pve-guests 服务会启动并等待法定人数。一旦达到法人数，它会启动所有设置了 onboot 标志的客户机。
+当你打开节点，或者在电力故障后电力恢复时，可能有些节点会比其他节点启动得更快。请记住，客户机启动会延迟，直到你达到法人数。
+
+5.13 客户机 VMID 自动选择
+在创建新的客户机时，web 接口将自动向后端请求一个空闲的 VMID。默认的搜索范围是 100 到 1000000（低于由模式强制执行的最大允许 VMID）。
+有时，管理员希望在一个单独的范围内分配新的 VMID，例如，以便轻松地将临时 VM 与手动选择 VMID 的 VM 分开。其他时候，只是希望提供一个稳定长度的 
+VMID，对于设置较低边界，例如，100000，提供了更多的空间。
+为了适应这种用例，可以通过 datacenter.cfg 配置文件设置较低、较高或两者的边界，该文件可以在 web 接口的 Datacenter ! Options 下编辑。
+注意
+该范围仅用于 next-id API 调用，所以它并不是一个硬限制。
+
+5.14 客户机迁移
+将虚拟客户机迁移到其他节点是集群中的一个有用特性。有设置可以控制这种迁移的行为。这可以通过配置文件 datacenter.cfg 或通过 API 或命令行参数针对特定迁移来完成。
+如果客户机在线或离线，或者如果它有本地资源（如本地磁盘），则会有所不同。
+关于虚拟机迁移的详细信息，请参阅 QEMU/KVM 迁移章节第 10.3 节。
+关于容器迁移的详细信息，请参阅容器迁移章节第 11.10 节。
+
+5.14.1 迁移类型
+迁移类型定义了迁移数据是否应通过加密（安全）通道或非加密（不安全）通道发送。将迁移类型设置为不安全意味着虚拟客户机的 RAM 
+内容也会以非加密的方式传输，这可能会导致来自客户机内部的关键数据的信息泄露（例如，密码或加密密钥）。
+因此，如果你不能完全控制网络并不能保证没有人在窃听，我们强烈建议使用安全通道。
+注意
+存储迁移不遵循此设置。目前，它总是通过安全通道发送存储内容。
+加密需要大量的计算能力，所以这个设置通常被改为不安全，以达到更好的性能。对现代系统的影响较小，因为它们在硬件中实现了 AES 加密。
+在快速网络中，性能影响尤其明显，你可以传输 10 Gbps 或更多。
+
+5.14.2 迁移网络
+默认情况下，Proxmox VE 使用进行集群通信的网络来发送迁移流量。这并不理想，因为敏感的集群流量可能会被中断，而且这个网络可能没有节点上可用的最佳带宽。
+设置迁移网络参数允许使用专用网络进行所有迁移流量。除了内存外，这也影响离线迁移的存储流量。
+迁移网络是使用 CIDR 符号法设置的网络。这样的优点是你不必为每个节点设置单独的 IP 地址。Proxmox VE 可以从 CIDR 
+形式指定的网络中确定目标节点的实际地址。为了实现这一点，必须指定网络，使得每个节点在各自的网络中都有一个 IP。
+示例
+我们假设我们有一个三节点的设置，有三个独立的网络。一个用于与互联网的公共通信，一个用于集群通信，还有一个非常快的网络，我们想用它作为专用的迁移网络。
+这样的设置的网络配置可能如下所示：
+iface eno1 inet manual
+# public network
+auto vmbr0
+iface vmbr0 inet static
+address 192.X.Y.57/24
+gateway 192.X.Y.1
+bridge-ports eno1
+bridge-stp off
+bridge-fd 0
+# cluster network
+auto eno2
+iface eno2 inet static
+address 10.1.1.1/24
+# fast network
+auto eno3
+iface eno3 inet static
+address 10.1.2.1/24
+在这里，我们将使用网络 10.1.2.0/24 作为迁移网络。对于单个迁移，你可以使用命令行工具的 migration_network 参数来执行此操作：
+# qm migrate 106 tre --online --migration_network 10.1.2.0/24
+要将此配置为集群中所有迁移的默认网络，设置 /etc/pve/datacenter.cfg 文件的 migration 属性：
+# use dedicated migration network
+: secure,network=10.1.2.0/24
+注意
+当在 /etc/pve/datacenter.cfg 中设置迁移网络时，必须始终设置迁移类型。
+
+
+
+
+
+
+
+
+
+
