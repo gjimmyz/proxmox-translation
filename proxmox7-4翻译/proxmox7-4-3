@@ -103,7 +103,8 @@ deb http://download.proxmox.com/debian/ceph-octopus bullseye test
 wget https://enterprise.proxmox.com/debian/proxmox-release-bullseye.gpg --O /etc/apt/trusted.gpg.d/proxmox-release-bullseye.gpg
 之后使用 sha512sum CLI 工具验证校验和：
 sha512sum /etc/apt/trusted.gpg.d/proxmox-release-bullseye.gpg7 -
-fb03ec8a1675723d2853b84aa4fdb49a46a3bb72b9951361488bfd19b29aab0a789a4f8c7406e71a69aabbc727c936d3549731c4659ffa1a08f44db8fdcebfa /etc/apt/trusted.gpg.d/
+fb03ec8a1675723d2853b84aa4fdb49a46a3bb72b9951361488bfd19b29aab0a789a4f8c7406e71a69aabbc727c936d3549731c4659ffa1a08f44db8fdcebfa 
+/etc/apt/trusted.gpg.d/
 proxmox-release-bullseye.gpg
 或者使用 md5sum CLI 工具：
 md5sum /etc/apt/trusted.gpg.d/proxmox-release-bullseye.gpg
@@ -460,7 +461,8 @@ batch-size = 1000
 batch-timeout = "1s"
 根据此配置，您的服务器将在所有IP地址上的8089端口上监听，并将数据写入proxmox数据库。
 或者，该插件可以配置为使用InfluxDB 2.x的http(s) API。InfluxDB 1.8.x确实包含了这个v2 API的向前兼容的API端点。
-要使用它，将influxdbproto设置为http或https（取决于您的配置）。默认情况下，Proxmox VE使用proxmox组织和proxmox存储桶/数据库（它们可以分别使用配置组织和存储桶进行设置）。
+要使用它，将influxdbproto设置为http或https（取决于您的配置）。
+默认情况下，Proxmox VE使用proxmox组织和proxmox存储桶/数据库（它们可以分别使用配置组织和存储桶进行设置）。
 由于InfluxDB的v2 API只能通过身份验证使用，因此您必须生成一个可以写入正确存储桶的令牌并设置它。
 在1.8.x的v2兼容API中，您可以使用user:password作为令牌（如果需要），并可以省略组织，因为在InfluxDB 1.x中没有意义。
 您还可以使用超时设置设置HTTP超时（默认为1s），以及使用max-body-size设置设置最大批量大小（默认为25000000字节）（这对应于同名的InfluxDB设置）。
@@ -916,7 +918,8 @@ btrfs subvolume create /some/path
 与通过 rmdir 删除的目录相反，子卷不需要为空才能通过 btrfs 命令删除。
 btrfs subvolume delete /some/path
 创建子卷的快照
-BTRFS 实际上并未区分快照和普通子卷，因此，获取快照也可以看作是创建子卷的任意副本。按照惯例，Proxmox VE 在创建客户端磁盘或子卷的快照时会使用只读标志，但稍后可以更改此标志。
+BTRFS 实际上并未区分快照和普通子卷，因此，获取快照也可以看作是创建子卷的任意副本。
+按照惯例，Proxmox VE 在创建客户端磁盘或子卷的快照时会使用只读标志，但稍后可以更改此标志。
 btrfs subvolume snapshot -r /some/path /a/new/path
 这将在 /a/new/path 创建一个只读的 /some/path 子卷的“克隆”。对 /some/path 的任何未来修改都会在修改之前复制修改过的数据。
 如果省略只读（-r）选项，则两个子卷都将可写。
@@ -979,7 +982,8 @@ pvenode migrateall pve2 --vms 100,101,102 --with-local-disks
 3.11 证书管理
 
 3.11.1 集群内通信的证书
-默认情况下，每个 Proxmox VE 集群都会创建自己的（自签名的）证书颁发机构（CA）并为每个节点生成一个由上述 CA 签名的证书。这些证书用于与集群的 pveproxy 服务以及使用 SPICE 时的 Shell/Console 功能进行加密通信。
+默认情况下，每个 Proxmox VE 集群都会创建自己的（自签名的）证书颁发机构（CA）并为每个节点生成一个由上述 CA 签名的证书。
+这些证书用于与集群的 pveproxy 服务以及使用 SPICE 时的 Shell/Console 功能进行加密通信。
 CA 证书和密钥存储在 Proxmox 集群文件系统（pmxcfs）第 6 章中。
 
 3.11.2 API 和 Web GUI 的证书
@@ -1047,7 +1051,8 @@ Proxmox VE 重用了为 acme.sh 4 项目开发的 DNS 插件，请参阅其文�
 手动为 _acme-challenge.domain1.example 设置一个永久 CNAME 记录，指向 _acme-challenge.domain2.example，然后将 Proxmox VE 节点配置文件中的别名属性设置为 
 domain2.example，以允许 domain2.example 的 DNS 服务器验证 domain1.example 的所有挑战。
 插件组合
-如果您的节点通过具有不同要求/ DNS 配置能力的多个域名可访问，则可以组合 http-01 和 dns-01 验证。还可以通过为每个域指定不同的插件实例来混合来自多个提供商或实例的 DNS API。
+如果您的节点通过具有不同要求/ DNS 配置能力的多个域名可访问，则可以组合 http-01 和 dns-01 验证。
+还可以通过为每个域指定不同的插件实例来混合来自多个提供商或实例的 DNS API。
 提示
 如果可能的话，应避免通过多个域名访问相同的服务，因为这会增加复杂性。
 
