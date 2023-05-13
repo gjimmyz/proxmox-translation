@@ -182,27 +182,232 @@ pveceph osd destroy <ID>
 建议您启用 PG-Autoscaler 或根据您的设置计算 PG 数量。您可以在线找到公式和 PG 计算器5。从 Ceph Nautilus 开始，您可以在设置后更改 PG 数量6。
 5 PG 计算器 https://web.archive.org/web/20210301111112/http://ceph.com/pgcalc/
 6 放置组 https://docs.ceph.com/en/quincy/rados/operations/placement-groups/
+PG autoscaler 7 可以在后台自动调整存储池的 PG 数量。设置目标大小或目标比例高级参数有助于 PG-Autoscaler 做出更好的决策。
+示例：通过 CLI 创建池
+pveceph pool create <pool-name> --add_storages
+提示
+如果您还想为您的存储池自动定义一个存储，请保持 web 界面中的"添加为存储"复选框选中，或在创建池时使用命令行选项 --add_storages。
+存储池选项
+以下选项在创建存储池时可用，部分选项在编辑存储池时也可用。
+名称
+池的名称。这必须是唯一的，且之后不能更改。
+大小
+每个对象的副本数量。Ceph 总是尝试拥有这么多的对象副本。默认值：3。
+PG 自动缩放模式
+池的自动 PG 缩放模式 7。如果设置为警告，当池的 PG 数量不理想时，它会产生警告信息。默认值：警告。
+添加为存储
+使用新池配置 VM 或容器存储。默认值：true（仅在创建时可见）。
+高级选项
+最小大小
+每个对象的最小副本数量。如果一个 PG 的副本数量少于这个值，Ceph 将拒绝在池上进行 I/O。默认值：2。
+7 自动缩放 https://docs.ceph.com/en/quincy/rados/operations/placement-groups/#automated-scaling
+Crush 规则
+用于在集群中映射对象放置的规则。这些规则定义了数据在集群中的放置方式。有关基于设备的规则的信息，请参见 Ceph CRUSH 和设备类别第 8.7 节。
+PG 数量
+池开始时应具有的放置组（PG）6的数量。默认值：128。
+目标比例
+池中预期的数据比例。PG 自动缩放器根据与其他比例集的比例来使用该比例。如果两者都设置了，它将优先于目标大小。
+目标大小
+池中预期的数据量。PG 自动缩放器使用此大小来估算最佳 PG 数量。
+最小 PG 数量
+最小放置组数量。此设置用于微调池的 PG 数量的下限。PG 自动缩放器不会将 PG 合并到低于此阈值的数量。
+关于 Ceph 池处理的更多信息可以在 Ceph 池操作 8 手册中找到。
 
+8.6.2 纠删码池
+纠删编码（EC）是一种允许从一定数量的数据丢失中恢复的“前向错误纠正”编码。与复制池相比，纠删码池可以提供更多可用空间，但它们的性能有所降低。
+作为比较：在经典的复制池中，存储多个数据副本（大小），而在纠删码池中，数据被切分为 k 个数据块和附加的 m 个编码（检查）块。
+如果数据块丢失，可以使用这些编码块重新创建数据。
+编码块的数量，m，定义了可以在不丢失任何数据的情况下丢失多少个 OSD。存储的对象总数为 k + m。
+创建纠删码池
+可以使用 pveceph CLI 工具创建纠删码（EC）池。规划 EC 池需要考虑到它们与复制池的工作方式不同。
+EC 池的默认最小大小取决于 m 参数。如果 m = 1，EC 池的最小大小为 k。如果 m > 1，最小大小将为 k + 1。Ceph 文档建议保守的最小大小为 k + 2 9。
+如果可用的 OSD 数量少于最小大小，对池的任何 I/O 都将被阻止，直到再次有足够的 OSD 可用。
+8 Ceph 池操作 https://docs.ceph.com/en/quincy/rados/operations/pools/
+9 Ceph 纠删码池恢复 https://docs.ceph.com/en/quincy/rados/operations/erasure-code/#erasure-coded-poolrecovery
+注意
+在规划纠删码池时，请注意最小大小，因为它定义了需要多少个 OSD。否则，IO 将被阻止。
+例如，具有 k = 2 和 m = 1 的 EC 池将具有 size = 3，min_size = 2，并且如果一个 OSD 失效，将保持运行。
+如果池配置为 k = 2，m = 2，则具有 size = 4 和 min_size = 3，并且在丢失一个 OSD 时保持运行。
+要创建一个新的 EC 池，请运行以下命令：
+pveceph pool create <pool-name> --erasure-coding k=2,m=1
+可选参数包括 failure-domain 和 device-class。如果需要更改池使用的任何 EC 配置文件设置，您将需要使用新配置文件创建一个新池。
+这将创建一个新的 EC 池以及存储 RBD omap 和其他元数据所需的复制池。最后，将有一个 <pool name>-data 和 <pool name>-metada 
+池。默认行为是创建匹配的存储配置。如果不需要该行为，可以通过提供 --add_storages 0 参数来禁用它。
+在手动配置存储配置时，请记住需要设置 data-pool 参数。只有这样，EC 
+池才会用于存储数据对象。例如：
+注意
+可选参数 --size、--min_size 和 --crush_rule 将用于复制元数据池，但不用于纠删码数据池。
+如果您需要在数据池上更改 min_size，可以稍后进行。纠删码池上的 size 和 crush_rule 参数无法更改。
+如果需要进一步自定义 EC 配置文件，可以通过直接使用 Ceph 工具创建它10，并使用 profile 参数指定要使用的配置文件。
+例如：
+pveceph pool create <pool-name> --erasure-coding profile=<profile-name>
+添加 EC 池作为存储
+您可以将已存在的 EC 池添加为 Proxmox VE 的存储。它的工作方式与添加 RBD 池相同，但需要额外的 data-pool 选项。
+pvesm add rbd <storage-name> --pool <replicated-pool> --data-pool <ec-pool>
+提示
+不要忘记为任何外部 Ceph 集群添加 keyring 和 monhost 选项，这些集群不受本地 Proxmox VE 集群管理。
+10Ceph 纠删码配置文件 https://docs.ceph.com/en/quincy/rados/operations/erasure-code/#erasure-code-profiles
 
+8.6.3 销毁池
+要通过 GUI 销毁池，请在树视图中选择一个节点，然后转到 Ceph ! Pools 面板。选择要销毁的池，然后点击 Destroy 按钮。要确认销毁池，您需要输入池名称。
+运行以下命令销毁池。指定 -remove_storages 还可以删除关联的存储。
+pveceph pool destroy <name>
+注意
+池删除在后台运行，可能需要一些时间。在此过程中，您会注意到集群中的数据使用量在减少。
 
+8.6.4 PG 自动扩展器
+PG 自动扩展器允许集群考虑每个池中存储的（预期）数据量，并自动选择合适的 pg_num 值。它自 Ceph Nautilus 起可用。
+您可能需要激活 PG 自动扩展器模块，才能使调整生效。
+ceph mgr module enable pg_autoscaler
+自动扩展器是针对每个池配置的，并具有以下模式：
+warn 如果建议的 pg_num 值与当前值相差太大，将发出健康警告。
+on pg_num 将自动调整，无需任何手动交互。
+off 不会进行任何自动 pg_num 调整，且如果 PG 计数不是最佳值，不会发出警告。
+可以调整缩放因子以方便未来的数据存储，使用 target_size、target_size_ratio 和 pg_num_min 选项。
+警告
+默认情况下，如果池的 PG 计数偏离因子 3，自动扩展器会考虑调整池的 PG 计数。这将导致数据位置发生显著变化，并可能对集群产生很高的负载。
+您可以在 Ceph 的博客 - Nautilus 中的新功能：PG 合并和自动调整中找到更详细的 PG 自动扩展器介绍。
 
+8.7 Ceph CRUSH 和设备类
+CRUSH（可扩展哈希下的受控复制）算法是 Ceph 的基础。CRUSH 计算数据存储和检索的位置。这样做的好处是不需要中心索引服务。CRUSH 使用 OSD 
+的映射、桶（设备位置）和规则集（数据复制）来处理池。
+注意
+更多信息可以在 Ceph 文档中的 CRUSH map a 部分找到。
+aCRUSH map https://docs.ceph.com/en/quincy/rados/operations/crush-map/
+该映射可以更改以反映不同的复制层次结构。对象副本可以分离（例如，故障域），同时保持所需的分布。
+常见的配置是为不同的 Ceph 池使用不同类别的磁盘。因此，Ceph 在 luminous 版本中引入了设备类，以满足轻松生成规则集的需求。
+设备类可以在 ceph osd tree 输出中看到。这些类别代表了它们自己的根存储桶，可以使用下面的命令查看。
+ceph osd crush tree --show-shadow
+11CRUSH https://ceph.com/wp-content/uploads/2016/08/weil-crush-sc06.pdf
+上述命令的示例输出：
+ID CLASS WEIGHT TYPE NAME
+-16 nvme 2.18307 root default~nvme
+-13 nvme 0.72769 host sumi1~nvme
+12 nvme 0.72769 osd.12
+-14 nvme 0.72769 host sumi2~nvme
+13 nvme 0.72769 osd.13
+-15 nvme 0.72769 host sumi3~nvme
+14 nvme 0.72769 osd.14
+-1 7.70544 root default
+-3 2.56848 host sumi1
+12 nvme 0.72769 osd.12
+-5 2.56848 host sumi2
+13 nvme 0.72769 osd.13
+-7 2.56848 host sumi3
+14 nvme 0.72769 osd.14
+要指示池仅在特定设备类上分布对象，首先需要为设备类创建规则集：
+ceph osd crush rule create-replicated <rule-name> <root> <failure-domain> <class>
+<rule-name> 与池连接的规则名称（在 GUI 和 CLI 中可见）
+<root> 它应属于哪个 crush 根（默认 Ceph 根 "default"）
+<failure-domain> 应在哪个故障域分布对象（通常为主机）
+<class> 要使用的 OSD 后备存储类型（例如，nvme、ssd、hdd）
+一旦规则在 CRUSH 映射中，您可以告诉池使用该规则集。
+ceph osd pool set <pool-name> crush_rule <rule-name>
+提示
+如果池中已经包含对象，这些对象必须相应地移动。根据您的设置，这可能会对您的集群产生很大的性能影响。作为替代方案，您可以创建一个新池并分别移动磁盘。
 
+8.9 Ceph Client
+在遵循前面章节中的设置之后，您可以配置 Proxmox VE 使用这样的存储池来存储 VM 和容器映像。
+只需使用 GUI 添加一个新的 RBD 存储（请参阅 Ceph RADOS Block Devices (RBD) 第 7.15 节）。
+对于外部 Ceph 集群，您还需要将密钥环复制到预定义的位置。如果 Ceph 已经安装在 Proxmox 节点上，则会自动完成此操作。
+注意
+文件名需要是 <storage_id> + .keyring，其中 <storage_id> 是 /etc/pve/storage.cfg 中 rbd: 之后的表达式。
+在以下示例中，my-ceph-storage 是 <storage_id>：
+mkdir /etc/pve/priv/ceph
+cp /etc/ceph/ceph.client.admin.keyring /etc/pve/priv/ceph/my-ceph-storage.  -
+keyring
 
+8.9 CephFS
+Ceph 还提供了一个文件系统，它运行在与 RADOS 块设备相同的对象存储之上。
+元数据服务器（MDS）用于将 RADOS 支持的对象映射到文件和目录，使 Ceph 能够提供一个符合 POSIX 的、可复制的文件系统。这使您能够轻松配置一个集群化、高可用性的共享文件系统。
+Ceph 的元数据服务器保证文件在整个 Ceph 集群中均匀分布。因此，即使在高负载情况下，也不会压垮单个主机，这在传统共享文件系统方法（例如 NFS）中可能是一个问题。
+Proxmox VE 支持创建超融合的 CephFS 和使用现有的 CephFS 作为存储第 7.16 节，以保存备份、ISO 文件和容器模板。
 
+8.9.1 元数据服务器（MDS）
+CephFS 需要至少配置和运行一个元数据服务器才能正常工作。您可以通过 Proxmox VE Web GUI 的节点 -> CephFS 面板或使用以下命令从命令行创建 MDS：
+pveceph mds create
+集群中可以创建多个元数据服务器，但在默认设置下，一次只能有一个处于活动状态。如果 MDS 或其节点变得无响应（或崩溃），另一个备用 MDS 将被提升为活动状态。
+您可以在创建时使用 hotstandby 参数选项或在已创建的情况下设置/添加，以加快活动和备用 MDS 之间的切换：
+mds standby replay = true
+在 /etc/pve/ceph.conf 的相应 MDS 部分中启用此选项。启用此功能后，指定的 MDS 将保持在热状态，轮询活动的 MDS，以便在出现问题时更快地接管。
+注意
+此主动轮询将对您的系统和活动的 MDS 产生额外的性能影响。
+多个活动 MDS
+从 Luminous (12.2.x) 开始，您可以同时运行多个活动元数据服务器，但这通常只在同时运行大量客户端时有用。
+否则，MDS 很少成为系统的瓶颈。如果您想设置这个，请参考 Ceph 文档。12
 
+8.9.2 创建 CephFS
+借助 Proxmox VE 对 CephFS 的集成，您可以通过 Web 界面、CLI 或外部 API 接口轻松创建 CephFS。为使其正常工作，需要满足一些先决条件：
+成功设置 CEPHFS 的先决条件：
+    安装 Ceph 包 第 8.2.2 节 - 如果这已经在很久以前完成，您可能需要在更新后的系统上重新运行它，以确保安装所有与 CephFS 相关的软件包。
+    设置监视器 第 8.3 节
+    设置您的 OSD 第 8.3 节
+    设置至少一个 MDS 第 8.9.1 节
+完成此操作后，您可以通过 Web GUI 的节点 -> CephFS 面板或命令行工具 pveceph 来简单地创建 CephFS，例如：
+pveceph fs create --pg_num 128 --add-storage
+这将创建一个名为 cephfs 的 CephFS，使用名为 cephfs_data 的池存储数据，其中包含 128 个放置组，以及一个名为 cephfs_metadata 
+的元数据池，其中包含数据池放置组的四分之一（32）。
+请查看 Proxmox VE 管理的 Ceph 池章节第 8.6 节或访问 Ceph 文档，以获取有关您设置的适当放置组数 (pg_num) 的更多信息6。
+此外，--add-storage 参数将在 CephFS 成功创建后将其添加到 Proxmox VE 存储配置中。
+12配置多个活动的 MDS 守护进程 https://docs.ceph.com/en/quincy/cephfs/multimds/
 
+8.9.3 销毁 CephFS
+警告
+销毁 CephFS 将使其所有数据无法使用。这个操作无法撤销！
+要完全优雅地删除 CephFS，需要执行以下步骤：
+• 断开与每个非 Proxmox VE 客户端的连接（例如，在客户机中卸载 CephFS）。
+• 禁用所有相关的 CephFS Proxmox VE 存储条目（以防止它自动挂载）。
+• 从客户机中删除位于要销毁的 CephFS 上的所有使用的资源（例如，ISO文件）。
+• 使用以下命令手动在所有集群节点上卸载 CephFS 存储：
+umount /mnt/pve/<STORAGE-NAME>
+其中 <STORAGE-NAME> 是您的 Proxmox VE 中 CephFS 存储的名称。
+• 现在，请确保没有元数据服务器（MDS）为该 CephFS 运行，可以通过停止或销毁它们来实现。这可以通过 Web 界面或命令行界面完成，后者可以执行以下命令：
+pveceph stop --service mds.NAME
+来停止它们，或者
+pveceph mds destroy NAME
+来销毁它们。
+请注意，当一个活动的 MDS 停止或删除时，备用服务器将自动晋升为活动状态，因此最好先停止所有备用服务器。
+• 现在，您可以使用以下命令销毁 CephFS：
+pveceph fs destroy NAME --remove-storages --remove-pools
+这将自动销毁底层的 Ceph 池以及从 pve 配置中删除存储。
+在完成这些步骤后，CephFS 应该被完全删除，如果您有其他 CephFS 实例，已停止的元数据服务器可以再次启动，充当备用服务器。
 
+8.10 Ceph 维护
 
+8.10.1 替换 OSD
+Ceph 中最常见的维护任务之一是替换 OSD 的磁盘。如果磁盘已处于故障状态，那么您可以继续执行销毁 OSD 第 8.5.2 节中的步骤。
+如果可能，Ceph 将在其余的 OSD 上重建这些副本。一旦检测到 OSD 故障或主动停止 OSD，重新平衡就会开始。
+注意
+对于默认的大小/最小大小（3/2）的存储池，只有在 'size + 1' 个节点可用时，恢复才会开始。
+这是因为 Ceph 对象负载均衡器 CRUSH（第 8.7 节）默认将完整节点作为 'failure domain'。
+要从 GUI 替换正常工作的磁盘，请按照销毁 OSD 第 8.5.2 节中的步骤操作。唯一的补充是，在停止 OSD 以销毁它之前，等待集群显示 HEALTH_OK。
+在命令行中，使用以下命令：
+ceph osd out osd.<id>
+您可以使用以下命令检查 OSD 是否可以安全地删除。
+ceph osd safe-to-destroy osd.<id>
+一旦上述检查告诉您可以安全地删除 OSD，您可以继续使用以下命令：
+systemctl stop ceph-osd@<id>.service
+pveceph osd destroy <id>
+用新磁盘替换旧磁盘，并按照创建 OSD 第 8.5.1 节中描述的相同步骤操作。
 
+8.10.2 Trim/Discard
+定期在虚拟机和容器上运行 fstrim（丢弃）是一种很好的做法。这会释放文件系统不再使用的数据块。这可以减少数据使用和资源负载。
+大多数现代操作系统会定期向其磁盘发出丢弃命令。您只需要确保虚拟机启用磁盘丢弃选项第 10.2.4 节。
 
+8.10.3 Scrub & Deep Scrub
+Ceph 通过对放置组进行擦洗来确保数据完整性。Ceph 检查 PG 中的每个对象的健康状况。擦洗有两种形式，每天廉价的元数据检查和每周深度数据检查。
+每周的深度擦洗读取对象并使用校验和确保数据完整性。如果正在运行的擦洗与业务（性能）需求相冲突，您可以调整擦洗操作执行的时间 13。
 
-
-
-
-
-
-
-
-
-
-
+8.11 Ceph 监控和故障排除
+从一开始，使用 Ceph 工具或通过 Proxmox VE API 访问状态来持续监控 Ceph 部署的健康状况非常重要。
+以下 Ceph 命令可用于查看集群是否健康（HEALTH_OK），是否存在警告（HEALTH_WARN），甚至错误（HEALTH_ERR）。
+如果集群处于不健康状态，下面的状态命令还将为您提供当前事件和采取措施的概述。
+13Ceph scrubbing https://docs.ceph.com/en/quincy/rados/configuration/osd-config-ref/#scrubbing
+# single time output
+pve# ceph -s
+# continuously output status changes (press CTRL+C to stop)
+pve# ceph -w
+要获取更详细的视图，每个 Ceph 服务在 /var/log/ceph/ 下都有一个日志文件。如果需要更详细的信息，可以调整日志级别14。
+您可以在官方网站上找到有关故障排除15 Ceph 集群的更多信息。
+14 Ceph 日志和调试 https://docs.ceph.com/en/quincy/rados/troubleshooting/log-and-debug/
+15 Ceph 故障排除 https://docs.ceph.com/en/quincy/rados/troubleshooting/
