@@ -349,7 +349,8 @@ corosync链接地址（在corosync.conf中用ringX_addr表示，为了向后兼�
 在早期版本上加入集群的节点可能在corosync.conf中仍然使用未解析的主机名。可能更好的主意是，如上所述，用IP或单独的主机名替换它们。
 
 5.8 Corosync冗余
-Corosync默认通过其集成的Kronosnet层支持冗余网络（在旧版udp/udpu传输上不支持）。可以通过指定多个链接地址来启用它，无论是通过pvecm的--linkX参数，在GUI中作为Link 1（在创建集群或添加新节点时），还是在corosync.conf中指定多个ringX_addr。
+Corosync默认通过其集成的Kronosnet层支持冗余网络（在旧版udp/udpu传输上不支持）。可以通过指定多个链接地址来启用它，无论是通过pvecm的--linkX参数，在GUI中作为Link 
+1（在创建集群或添加新节点时），还是在corosync.conf中指定多个ringX_addr。
 注意
 为了提供有用的故障切换，每个链接应在其自己的物理网络连接上。
 链接的使用根据优先级设置。你可以通过在corosync.conf的相应接口部分设置knet_link_priority，或者，更好的是，在用pvecm创建你的集群时使用priority参数来配置这个优先级：

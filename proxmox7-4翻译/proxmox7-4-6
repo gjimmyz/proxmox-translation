@@ -113,7 +113,8 @@ echo "0" >/etc/pve/.debug
 接下来，根据丢失的 Proxmox VE 主机调整 /etc/hostname 和 /etc/hosts，然后重新启动并检查（别忘了您的 VM/CT 数据）。
 
 6.5 恢复
-如果您的 Proxmox VE 主机出现重大问题，例如硬件问题，将 pmxcfs 数据库文件 /var/lib/pve-cluster/config.db 复制并移动到新的 Proxmox VE 主机可能会有所帮助。在新主机上（没有运行任何东西），您需要停止 pve-cluster 服务并替换 config.db 文件（需要 0600 的权限）。
+如果您的 Proxmox VE 主机出现重大问题，例如硬件问题，将 pmxcfs 数据库文件 /var/lib/pve-cluster/config.db 复制并移动到新的 Proxmox VE 
+主机可能会有所帮助。在新主机上（没有运行任何东西），您需要停止 pve-cluster 服务并替换 config.db 文件（需要 0600 的权限）。
 接下来，根据丢失的 Proxmox VE 主机调整 /etc/hostname 和 /etc/hosts，然后重新启动并检查（别忘了您的 VM/CT 数据）。
 
 6.5.1 删除集群配置
