@@ -530,20 +530,341 @@ LVM 是典型的块存储，但此后端不支持快照和克隆。不幸的是�
 一个很大的优点是您可以将其用于共享存储之上，例如 iSCSI LUN。后端本身实现了适当的集群范围锁定。
 提示
 较新的 LVM-thin 后端允许快照和克隆，但不支持共享存储。
+Table 7.9: Storage features for backend lvm
+Content types Image formats Shared Snapshots Clones
+images
+rootdir
+raw possible no no
 
+7.11.4 示例
+列出可用的卷组：
+pvesm lvmscan
 
+7.12 LVM thin 后端
+存储池类型：lvmthin
+LVM 通常在创建卷时分配块。相反，LVM thin 池在写入时分配块。这种行为被称为瘦置，因为卷可以比实际可用空间大得多。
+您可以使用常规的 LVM 命令行工具来管理和创建 LVM thin 池（详见 man lvmthin）。
+假设您已经有一个名为 pve 的 LVM 卷组，以下命令将创建一个名为 data 的新 LVM thin 池（大小为 100G）：
+lvcreate -L 100G -n data pve
+lvconvert --type thin-pool pve/data
 
+7.12.1 配置
+LVM thin 后端支持通用存储属性 content, nodes, disable 以及以下 LVM 特定属性：
+vgname
+LVM 卷组名称。这必须指向一个现有的卷组。
+thinpool
+LVM thin 池的名称。
+配置示例（/etc/pve/storage.cfg）
+lvmthin: local-lvm
+thinpool data
+vgname pve
+content rootdir,images
 
+7.12.2 文件命名规则
+后端基本上使用与 ZFS 池后端相同的命名约定。
+vm-<VMID>-<NAME> // 普通 VM 镜像
 
+7.12.3 存储功能
+LVM thin 是一种块存储，但完全支持高效的快照和克隆。新卷会自动初始化为零。
+需要注意的是，LVM thin 池不能跨多个节点共享，因此您只能将它们用作本地存储。
+表 7.10：lvmthin 后端的存储功能
+内容类型 镜像格式 共享 快照 克隆
+镜像
+rootdir
+raw 否 是 是
 
+7.12.4 示例
+在卷组 pve 上列出可用的 LVM thin 池：
+pvesm lvmthinscan pve
 
+7.13 Open-iSCSI initiator
+存储池类型：iscsi
+iSCSI 是一种广泛用于连接存储服务器的技术。几乎所有存储供应商都支持 iSCSI。还有一些基于开源的 iSCSI 目标解决方案可用，例如基于 Debian 的 OpenMediaVault。
+要使用此后端，您需要安装 Open-iSCSI（open-iscsi）软件包。这是一个标准的 Debian 软件包，但默认情况下不安装，以节省资源。
+apt-get install open-iscsi
+低级别的 iscsi 管理任务可以使用 iscsiadm 工具完成。
 
+7.13.1 配置
+后端支持通用存储属性 content, nodes, disable 以及以下 iSCSI 特定属性：
+portal
+iSCSI门户（可选端口的IP或DNS名称）。
+target
+iSCSI 目标。
+配置示例（/etc/pve/storage.cfg）
+iscsi: mynas
+portal 10.10.10.1
+target iqn.2006-01.openfiler.com:tsn.dcb5aaaddd
+content none
+提示
+如果您想在 iSCSI 之上使用 LVM，将 content 设置为 none 是有意义的。这样就无法直接使用 iSCSI LUN 创建 VM。
 
+7.13.2 文件命名约定
+iSCSI 协议没有定义分配或删除数据的接口。相反，这需要在目标端完成并且是特定于供应商的。目标只是将它们作为编号 LUN 导出。
+所以 Proxmox VE iSCSI 卷名只是对由 Linux 内核看到的 LUN 的一些信息进行编码。
 
+7.13.3 存储功能
+iSCSI 是一种块级类型存储，没有提供管理接口。所以通常最好导出一个大 LUN，并在该 LUN 上设置 LVM。然后，您可以使用 LVM 插件管理该 iSCSI LUN 上的存储。
+表 7.11：iscsi 后端的存储功能
+内容类型 镜像格式 共享 快照 克隆
+图像 none raw 是 不 不
 
+7.13.4 示例
+扫描远程 iSCSI 门户，并返回可能的目标列表：
+pvesm scan iscsi <HOST[:PORT]>
 
+7.14 用户模式 iSCSI 后端
+存储池类型：iscsidirect
+这个后端基本上提供了与 Open-iSCSI 后端相同的功能，但使用用户级库来实现它。您需要安装 libiscsi-bin 软件包才能使用此后端。
+应该注意的是，这里没有涉及到内核驱动，所以可以将其视为性能优化。但这带来了一个缺点，即您无法在此类 iSCSI LUN 之上使用 LVM。
+因此，您需要在存储服务器端管理所有空间分配。
 
+7.14.1 配置
+用户模式 iSCSI 后端使用与 Open-iSCSI 后端相同的配置选项。
+配置示例（/etc/pve/storage.cfg）
+iscsidirect: faststore
+portal 10.10.10.1
+target iqn.2006-01.openfiler.com:tsn.dcb5aaaddd
 
+7.14.2 存储功能
+注意
+此后端仅适用于 VM。容器无法使用此驱动。
+表 7.12：后端 iscsidirect 的存储功能
+内容类型 镜像格式 共享 快照 克隆
+images raw 是 不 不
 
+7.15 Ceph RADOS 块设备（RBD）
+存储池类型：rbd
+Ceph 是一个分布式对象存储和文件系统，旨在提供卓越的性能、可靠性和可扩展性。RADOS 块设备实现了功能丰富的块级存储，您可以获得以下优势：
+• 薄置备
+• 可调整大小的卷
+• 分布式且冗余（分布在多个 OSD 上）
+• 完整的快照和克隆功能
+• 自我修复
+• 无单点故障
+• 可扩展到艾字节级别
+• 可用内核和用户空间实现
+注意
+对于较小的部署，还可以直接在您的 Proxmox VE 节点上运行 Ceph 服务。最新的硬件具有足够的 CPU 功率和 RAM，因此可以在同一节点上运行存储服务和 VM。
 
+7.15.1 配置
+此后端支持通用存储属性 nodes、disable、content 以及以下特定于 rbd 的属性：
+monhost
+监视器守护进程 IP 列表。可选的，仅在 Proxmox VE 集群上未运行 Ceph 时需要。
+pool
+Ceph 池名称。
+username
+RBD 用户 ID。可选的，仅在 Proxmox VE 集群上未运行 Ceph 时需要。请注意，只应使用用户 ID。"client." 类型前缀必须省略。
+krbd
+通过 krbd 内核模块强制访问 rados 块设备。可选的。
+注意
+容器将独立于选项值使用 krbd。
+用于外部 Ceph 集群的配置示例（/etc/pve/storage.cfg）
+rbd: ceph-external
+monhost 10.1.1.20 10.1.1.21 10.1.1.22
+pool ceph-external
+content images
+username admin
+提示
+您可以使用 rbd 实用程序执行低级管理任务。
 
+7.15.2 认证
+注意
+如果在 Proxmox VE 集群上本地安装了 Ceph，则在添加存储时会自动完成以下操作。
+如果您使用默认启用的 cephx 认证，您需要提供来自外部 Ceph 集群的密钥环。
+要通过 CLI 配置存储，您首先需要使包含密钥环的文件可用。一种方法是将文件从外部 Ceph 集群直接复制到 Proxmox VE 节点之一。以下示例将其复制到我们运行的节点的 /root 目录：
+scp <external cephserver>:/etc/ceph/ceph.client.admin.keyring /root/rbd.keyring
+然后使用 pvesm CLI 工具配置外部 RBD 存储，使用 --keyring 参数，该参数需要是您复制的密钥环文件的路径。例如：
+pvesm add rbd <name> --monhost "10.1.1.20 10.1.1.21 10.1.1.22" --content images --keyring /root/rbd.keyring
+通过 GUI 配置外部 RBD 存储时，您可以将密钥环复制并粘贴到相应的字段中。
+密钥环将存储在
+/etc/pve/priv/ceph/<STORAGE_ID>.keyring
+提示
+连接到外部集群时，建议创建一个仅具有所需功能的密钥环。有关 Ceph 用户管理的更多信息，请参阅 Ceph 文档。a
+a Ceph 用户管理
+
+7.15.3 Ceph 客户端配置（可选）
+连接到外部 Ceph 存储并不总是允许在外部集群的配置 DB 中设置客户端特定选项。您可以在 Ceph 密钥环旁边添加一个 ceph.conf，以更改存储的 Ceph 客户端配置。
+ceph.conf 需要与存储具有相同的名称。
+/etc/pve/priv/ceph/<STORAGE_ID>.conf
+有关可能的设置，请参阅 RBD 配置参考 1。
+注意
+不要轻易更改这些设置。Proxmox VE 正在将 <STORAGE_ID>.conf 与存储配置合并。
+1 RBD 配置参考：https://docs.ceph.com/en/quincy/rbd/rbd-config-ref/
+
+7.15.4 存储特性
+rbd 后端是一个块级存储，实现了完整的快照和克隆功能。
+表 7.13：rbd 后端的存储特性
+内容类型 图像格式 共享 快照 克隆
+图像
+根目录
+raw 是 是 是
+
+7.16 Ceph 文件系统（CephFS）
+存储池类型：cephfs
+CephFS 实现了一个符合 POSIX 的文件系统，使用 Ceph 存储集群存储其数据。由于 CephFS 是基于 Ceph 构建的，因此它们具有大部分相同的属性。
+这包括冗余、可扩展性、自我修复和高可用性。
+提示
+Proxmox VE 可以管理 Ceph 设置第 8 章，这使得配置 CephFS 存储更容易。随着现代硬件提供了大量的处理能力和 RAM，在同一节点上运行存储服务和 VM 是可能的，
+而不会对性能产生重大影响。要使用 CephFS 存储插件，您必须替换原有的 Debian Ceph 客户端，通过添加我们的 Ceph 存储库第 3.1.5 节。
+添加后，运行 apt update，然后运行 apt dist-upgrade，以获取最新的软件包。
+警告
+请确保没有配置其他 Ceph 存储库。否则，安装将失败，或者节点上将有混合的软件包版本，导致意外行为。
+
+7.16.1 配置
+此后端支持通用存储属性节点、禁用、内容以及以下 cephfs 特定属性：
+monhost
+监视器守护进程地址列表。可选，仅在 Ceph 未在 Proxmox VE 集群上运行时需要。
+path
+本地挂载点。可选，默认为 /mnt/pve/<STORAGE_ID>/。
+username
+Ceph 用户 id。可选，仅在 Ceph 未在 Proxmox VE 集群上运行时需要，默认为 admin。
+subdir
+要挂载的 CephFS 子目录。可选，默认为 /。
+fuse
+通过 FUSE 访问 CephFS，而不是内核客户端。可选，默认为 0。
+外部 Ceph 集群的配置示例（/etc/pve/storage.cfg）
+cephfs: cephfs-external
+monhost 10.1.1.20 10.1.1.21 10.1.1.22
+path /mnt/pve/cephfs-external
+content backup
+username admin
+注意
+如果没有禁用 cephx，请不要忘记设置客户端的密钥文件。
+
+7.16.2 认证
+注意
+如果 Ceph 安装在 Proxmox VE 集群上，则在添加存储时自动执行以下操作。
+如果您使用 cephx 认证（默认启用），则需要提供外部 Ceph 集群的密钥。
+要通过 CLI 配置存储，首先需要提供包含密钥的文件。一种方法是将文件从外部 Ceph 集群直接复制到 Proxmox VE 节点之一。
+以下示例将其复制到我们运行它的节点的 /root 目录中：
+scp <external cephserver>:/etc/ceph/cephfs.secret /root/cephfs.secret
+然后使用 pvesm CLI 工具配置外部 RBD 存储，使用 --keyring 参数，该参数需要是您复制的密钥文件的路径。例如：
+pvesm add cephfs <name> --monhost "10.1.1.20 10.1.1.21 10.1.1.22" -- -
+content backup --keyring /root/cephfs.secret
+通过 GUI 配置外部 RBD 存储时，可以将密钥复制并粘贴到相应的字段中。
+密钥本身只是密钥，与 rbd 后端相反，它还包含 [client.userid] 部分。
+密钥将存储在
+# /etc/pve/priv/ceph/<STORAGE_ID>.secret
+从 Ceph 集群（作为 Ceph 管理员）接收密钥，可以通过发出以下命令，其中
+userid 是已配置为访问集群的客户端 ID。有关 Ceph 用户的更多信息
+管理，请参阅 Ceph 文档。a
+ceph auth get-key client.userid > cephfs.secret
+
+7.16.3 存储功能
+cephfs 后端是一个基于 Ceph 集群的 POSIX 兼容文件系统。
+表 7.14：后端 cephfs 的存储功能
+内容类型 图像格式 共享 快照 克隆
+vztmpl iso
+备份
+片段
+无 是 是[1] 否
+[1] 尽管没有已知的错误，但由于缺乏足够的测试，快照尚未保证稳定。
+
+7.17 BTRFS 后端
+存储池类型：btrfs
+从表面上看，这种存储类型与目录存储类型非常相似，因此请参阅目录后端
+部分以获得概述。
+主要区别在于，使用此存储类型时，将原始格式化磁盘放置在子卷中，以便
+允许获取快照并支持在保留快照的情况下进行离线存储迁移。
+注意
+BTRFS 将在打开文件时遵守 O_DIRECT 标志，这意味着 VM 不应使用缓存模式
+无，否则将出现校验和错误。
+
+7.17.1 配置
+此后端的配置方式与目录存储类似。请注意，在将目录作为 BTRFS 添加
+存储，本身也不是挂载点时，强烈建议通过 is_mountpoint 选项指定实际挂载点。
+例如，如果一个 BTRFS 文件系统挂载在 /mnt/data2 上，而其 pve-storage/ 子目录
+（可以是快照，建议使用）应作为名为 data2 的存储池添加，您
+可以使用以下条目：
+btrfs: data2
+path /mnt/data2/pve-storage
+content rootdir,images
+is_mountpoint /mnt/data2
+
+7.17.2 快照
+在获取子卷或原始文件的快照时，快照将创建为一个只读子卷
+具有相同的路径，后跟 @ 和快照的名称。
+
+7.18 ZFS over ISCSI 后端
+存储池类型：zfs
+此后端通过 ssh 访问具有 ZFS 池作为存储和 iSCSI 目标实现的远程机器。对于每个客户磁盘，它创建一个 ZVOL 并将其作为 iSCSI LUN 导出。
+Proxmox VE 使用此 LUN 作为客户磁盘。
+支持以下 iSCSI 目标实现：
+• LIO（Linux）
+• IET（Linux）
+• ISTGT（FreeBSD）
+• Comstar（Solaris）
+注意
+此插件需要一个支持 ZFS 的远程存储设备，您不能用它在常规存储设备/SAN 上创建 ZFS 池
+
+7.18.1 配置
+要使用 ZFS over iSCSI 插件，您需要配置远程机器（目标）以接受来自 Proxmox VE 节点的 ssh 连接。
+Proxmox VE 连接到目标以创建 ZVOL 并通过 iSCSI 导出它们。身份验证是通过存储在 /etc/pve/priv/zfs/<target_ip>_id_rsa 中的 ssh 密钥（无密码保护）完成的。
+以下步骤创建一个 ssh 密钥并将其分发给 IP 为 192.0.2.1 的存储机器：
+mkdir /etc/pve/priv/zfs
+ssh-keygen -f /etc/pve/priv/zfs/192.0.2.1_id_rsa
+ssh-copy-id -i /etc/pve/priv/zfs/192.0.2.1_id_rsa.pub root@192.0.2.1
+ssh -i /etc/pve/priv/zfs/192.0.2.1_id_rsa root@192.0.2.1
+后端支持通用存储属性 content、nodes、disable 以及以下
+ZFS over ISCSI 特定属性：
+pool
+iSCSI 目标上的 ZFS 池/文件系统。所有分配都在该池中完成。
+portal
+iSCSI 门户（IP 或带可选端口的 DNS 名称）。
+target
+iSCSI 目标。
+iscsiprovider
+远程计算机上使用的 iSCSI 目标实现
+comstar_tg
+comstar 视图的目标组。
+comstar_hg
+comstar 视图的主机组。
+lio_tpg
+Linux LIO 目标的目标门户组
+nowritecache
+在目标上禁用写入缓存
+blocksize
+设置 ZFS 块大小参数。
+sparse
+使用 ZFS 稀疏卷。稀疏卷是其预留不等于卷大小的卷。
+配置示例（/etc/pve/storage.cfg）
+zfs: lio
+blocksize 4k
+iscsiprovider LIO
+pool tank
+portal 192.0.2.111
+target iqn.2003-01.org.linux-iscsi.lio.x8664:sn.xxxxxxxxxxxx
+content images
+lio_tpg tpg1
+sparse 1
+zfs: solaris
+blocksize 4k
+target iqn.2010-08.org.illumos:02:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:  -
+tank1
+pool tank
+iscsiprovider comstar
+portal 192.0.2.112
+content images
+zfs: freebsd
+blocksize 4k
+target iqn.2007-09.jp.ne.peach.istgt:tank1
+pool tank
+iscsiprovider istgt
+portal 192.0.2.113
+content images
+zfs: iet
+blocksize 4k
+target iqn.2001-04.com.example:tank1
+pool tank
+iscsiprovider iet
+portal 192.0.2.114
+content images
+
+7.18.2 存储特性
+ZFS over iSCSI 插件提供了一个支持快照的共享存储。在部署中，您需要确保 ZFS 存储设备不会成为单点故障。
+为了实现高可用性，您可以考虑在您的环境中部署多个 ZFS 存储设备，并使用冗余和故障转移策略以防止单点故障。
+以下是 ZFS over iSCSI 后端存储的功能：
+表格 7.15：ZFS over iSCSI 后端的存储功能
+内容类型	图像格式	共享	快照	克隆
+images	raw	是	是	否
+请注意，ZFS over iSCSI 后端不支持克隆功能。
