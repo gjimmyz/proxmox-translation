@@ -1,2 +1,543 @@
 proxmox7-4-7
 
+第7章
+Proxmox VE 存储
+Proxmox VE 的存储模型非常灵活。虚拟机镜像可以存储在一个或多个本地存储中，也可以存储在 NFS 或 iSCSI（NAS，SAN）等共享存储上。没有任何限制，您可以根据需要配置任意数量的存储池。您可以使用 Debian Linux 支持的所有存储技术。
+将 VM 存储在共享存储上的一个主要优点是能够在不中断服务的情况下实时迁移正在运行的计算机，因为集群中的所有节点都可以直接访问 VM 磁盘镜像。无需复制 VM 镜像数据，因此在这种情况下实时迁移非常快。
+存储库（libpve-storage-perl 包）使用灵活的插件系统为所有存储类型提供通用接口。这可以很容易地扩展以在未来包括更多的存储类型。
+
+7.1 存储类型
+基本上有两种不同类别的存储类型：
+文件级存储
+基于文件级的存储技术允许访问功能齐全的（POSIX）文件系统。它们通常比任何块级存储（见下文）更灵活，并允许您存储任何类型的内容。
+ZFS 可能是最先进的系统，它对快照和克隆提供了全面支持。
+块级存储
+允许存储大型原始映像。通常无法在这种存储类型上存储其他文件（ISO，备份等）。大多数现代块级存储实现支持快照和克隆。
+RADOS 和 GlusterFS 是分布式系统，将存储数据复制到不同的节点。
+
+表 7.1：可用存储类型
+Description PVE type Level Shared Snapshots Stable
+ZFS (local) zfspool file no yes yes
+Directory dir file no no1 yes
+BTRFS btrfs file no yes technology
+preview
+表 7.1: (继续)
+Description PVE type Level Shared Snapshots Stable
+NFS nfs file yes no1 yes
+CIFS cifs file yes no1 yes
+Proxmox Backup pbs both yes n/a yes
+GlusterFS glusterfs file yes no1 yes
+CephFS cephfs file yes yes yes
+LVM lvm block no2 no yes
+LVM-thin lvmthin block no yes yes
+iSCSI/kernel iscsi block yes no yes
+iSCSI/libiscsi iscsidirectblock yes no yes
+Ceph/RBD rbd block yes yes yes
+ZFS over iSCSI zfs block yes yes yes
+1：在基于文件的存储上，使用 qcow2 格式可以实现快照功能。
+2：可以在基于 iSCSI 或 FC 的存储之上使用 LVM。这样，您将获得共享的 LVM 存储。
+
+7.1.1 瘦配置
+许多存储和 QEMU 镜像格式 qcow2 支持瘦配置。启用瘦配置后，只有客户机系统实际使用的块才会写入存储。
+例如，您创建了一个带有 32GB 硬盘的 VM，在安装客户机系统操作系统后，VM 的根文件系统包含 3GB 数据。在这种情况下，即使客户机 VM 看到的是 32GB 硬盘，存储上也只写入了 
+3GB。通过这种方式，瘦配置允许您创建比当前可用存储块更大的磁盘映像。您可以为 VM 创建大型磁盘映像，根据需要向存储添加更多磁盘，而无需调整 VM 文件系统的大小。
+所有具有“快照”功能的存储类型也支持瘦配置。
+注意
+如果存储空间耗尽，所有在该存储上使用卷的客户机将收到 IO 错误。这可能导致文件系统不一致，并可能破坏您的数据。因此，建议避免过度分配存储资源，或仔细观察剩余空间以避免此类情况。
+
+7.2 存储配置
+所有与 Proxmox VE 相关的存储配置都存储在 /etc/pve/storage.cfg 的单个文本文件中。由于此文件位于 /etc/pve/ 下，因此会自动分发到所有集群节点。
+因此，所有节点共享相同的存储配置。
+对于共享存储，共享存储配置是非常有意义的，因为相同的“共享”存储可以从所有节点访问。但它对本地存储类型也很有用。
+在这种情况下，这样的本地存储可以在所有节点上使用，但它在物理上是不同的
+，可以具有完全不同的内容。
+
+7.2.1 存储池
+每个存储池都有一个<type>，并通过其<STORAGE_ID>唯一标识。池配置如下所示：
+<type>: <STORAGE_ID>
+<property> <value>
+<property> <value>
+<property>
+...
+<type>：<STORAGE_ID>行开始池定义，然后是一系列属性。
+大多数属性需要一个值。有些具有合理的默认值，在这种情况下，您可以省略该值。
+更具体地说，看一下安装后的默认存储配置。它包含一个名为 local 的特殊本地存储池，该存储池指向目录 /var/lib/vz 并始终可用。Proxmox VE 
+安装程序根据安装时选择的存储类型创建其他存储条目。
+默认存储配置（/etc/pve/storage.cfg）
+dir: local
+path /var/lib/vz
+content iso,vztmpl,backup
+# default image store on LVM based installation
+lvmthin: local-lvm
+thinpool data
+vgname pve
+content rootdir,images
+# default image store on ZFS based installation
+zfspool: local-zfs
+pool rpool/data
+sparse
+content images,rootdir
+
+7.2.2 通用存储属性
+一些存储属性在不同的存储类型之间是通用的。
+nodes
+此存储可用/可访问的集群节点名称列表。可以使用此属性将存储访问限制为一组有限的节点。
+content
+存储可以支持多种内容类型，例如虚拟磁盘映像、cdrom iso 映像、容器模板或容器根目录。并非所有存储类型都支持所有内容类型。可以设置此属性以选择此存储用于何种用途。
+images
+QEMU/KVM VM映像。
+rootdir
+允许存储容器数据。
+vztmpl
+容器模板。
+backup
+备份文件（vzdump）。
+iso
+ISO映像
+snippets
+片段文件，例如客户端挂钩脚本
+shared
+将存储标记为共享。
+disable
+您可以使用此标志完全禁用存储。
+maxfiles
+已弃用，请改用prune-backups。每个VM的最大备份文件数量。使用0表示无限制。
+prune-backups
+备份保留选项。有关详细信息，请参阅备份保留第16.6节。
+format
+默认映像格式（raw|qcow2|vmdk）
+preallocation
+文件为基础的存储中的原始和qcow2映像的预分配模式（off|metadata|falloc|full）。默认值是metadata，对于raw映像处理类似于off。
+当使用网络存储与大型qcow2映像结合时，使用off可以帮助避免超时。
+警告
+不建议在不同的Proxmox VE集群上使用相同的存储池。某些存储操作需要对存储的独占访问，因此需要适当的锁定。虽然这在集群内实现，但在不同的集群之间无法工作。
+
+7.3 卷
+我们使用一种特殊的表示法来表示存储数据。当您从存储池分配数据时，它会返回一个卷标识符。
+卷由<STORAGE_ID>标识，后跟一个存储类型依赖的卷名，用冒号分隔。有效的<VOLUME_ID>看起来像：
+local:230/example-image.raw
+local:iso/debian-501-amd64-netinst.iso
+local:vztmpl/debian-5.0-joomla_1.5.9-1_i386.tar.gz
+iscsi-storage:0.0.2.scsi-14 -
+f504e46494c4500494b5042546d2d646744372d31616d61
+要获取<VOLUME_ID>的文件系统路径，请使用：
+pvesm path <VOLUME_ID>
+
+7.3.1 卷所有权
+存在图像类型卷的所有权关系。每个此类卷都由VM或容器拥有。例如，卷local:230/example-image.raw由VM 230拥有。大多数存储后端将此所有权信息编码到卷名称中。
+当您删除VM或容器时，系统还会删除由该VM或容器拥有的所有关联卷。
+
+7.4 使用命令行界面
+建议您熟悉存储池和卷标识符背后的概念，但在现实生活中，您不必在命令行上执行任何这些低级操作。通常，卷的分配和删除是由VM和容器管理工具完成的。
+尽管如此，还有一个名为pvesm（“Proxmox VE Storage Manager”）的命令行工具，能够执行常见的存储管理任务。
+
+7.4.1 示例
+添加存储池
+pvesm add <TYPE> <STORAGE_ID> <OPTIONS>
+pvesm add dir <STORAGE_ID> --path <PATH>
+pvesm add nfs <STORAGE_ID> --path <PATH> --server <SERVER> --export  -
+<EXPORT>
+pvesm add lvm <STORAGE_ID> --vgname <VGNAME>
+pvesm add iscsi <STORAGE_ID> --portal <HOST[:PORT]> --target <TARGET  ->
+禁用存储池
+pvesm set <STORAGE_ID> --disable 1
+启用存储池
+pvesm set <STORAGE_ID> --disable 0
+更改/设置存储选项
+pvesm set <STORAGE_ID> <OPTIONS>
+pvesm set <STORAGE_ID> --shared 1
+pvesm set local --format qcow2
+pvesm set <STORAGE_ID> --content iso
+删除存储池。这不会删除任何数据，也不会断开或卸载任何内容。它只是删除存储配置。
+pvesm remove <STORAGE_ID>
+分配卷
+pvesm alloc <STORAGE_ID> <VMID> <name> <size> [--format <raw|qcow2>]
+在本地存储中分配一个4G卷。如果将空字符串作为<name>传递，则自动生成名称。
+pvesm alloc local <VMID> '' 4G
+释放卷
+pvesm free <VOLUME_ID>
+警告
+这确实会破坏所有卷数据。
+列出存储状态
+pvesm status
+列出存储内容
+pvesm list <STORAGE_ID> [--vmid <VMID>]
+列出由 VMID 分配的卷
+pvesm list <STORAGE_ID> --vmid <VMID>
+列出 iso 镜像
+pvesm list <STORAGE_ID> --iso
+列出容器模板
+pvesm list <STORAGE_ID> --vztmpl
+显示卷的文件系统路径
+pvesm path <VOLUME_ID>
+将卷 local:103/vm-103-disk-0.qcow2 导出到文件目标。这主要在内部与 pvesm import 一起使用。
+流格式 qcow2+size 与 qcow2 格式不同。因此，导出的文件不能简单地附加到 VM 上。其他格式也是如此。
+pvesm export local:103/vm-103-disk-0.qcow2 qcow2+size target --with- -
+snapshots 1
+
+7.5 目录后端
+存储池类型：dir
+Proxmox VE 可以使用本地目录或本地挂载的共享存储。目录是一个文件级别的存储，因此您可以存储任何内容类型，如虚拟磁盘映像、容器、模板、ISO 映像或备份文件。
+注意
+您可以通过标准的 Linux /etc/fstab 挂载额外的存储，然后为该挂载点定义一个目录存储。这样您可以使用 Linux 支持的任何文件系统。
+该后端假定底层目录是 POSIX 兼容的，但其他方面没有限制。这意味着您不能在存储级别创建快照。但是对于使用 qcow2 文件格式的 VM 映像，存在一种解决方法，因为该格式内部支持快照。
+提示
+某些存储类型不支持 O_DIRECT，因此您无法在此类存储中使用缓存模式 none。而是简单地使用缓存模式 writeback。
+我们使用一个预定义的目录布局将不同内容类型存储到不同的子目录中。此布局由所有文件级别存储后端使用。
+表 7.2：目录布局
+Content type Subdir
+VM images images/<VMID>/
+ISO images template/iso/
+Container templates template/cache/
+Backup files dump/
+Snippets snippets/
+
+7.5.1 配置
+该后端支持所有通用存储属性，并添加了两个附加属性。path 属性用于指定目录。这需要是一个绝对文件系统路径。
+可选的 content-dirs 属性允许更改默认布局。它由以下格式的逗号分隔的标识符列表组成：
+vtype=path
+其中 vtype 是存储允许的内容类型之一，path 是相对于存储挂载点的路径。
+配置示例 (/etc/pve/storage.cfg)
+dir: backup
+path /mnt/backup
+content backup
+prune-backups keep-last=7
+max-protected-backups 3
+content-dirs backup=custom/backup/dir
+上述配置定义了一个名为 backup 的存储池。该池可用于为每个 VM 存储最多 7 个
+定期备份 (keep-last=7) 和 3 个受保护的备份。备份文件的实际路径是
+/mnt/backup/custom/backup/dir/....
+
+7.5.2 文件命名约定
+此后端为 VM 映像使用明确定义的命名方案：
+vm-<VMID>-<NAME>.<FORMAT>
+<VMID>
+这指定了所有者 VM。
+<NAME>
+这可以是任意名称（ascii），没有空格。后端将其默认为 disk-[N]，其中 [N] 被替换为整数以使名称唯一。
+<FORMAT>
+指定映像格式（raw|qcow2|vmdk）。
+当您创建一个 VM 模板时，所有 VM 映像都会被重命名以表示它们现在是只读的，并且
+可以用作克隆的基本映像：
+base-<VMID>-<NAME>.<FORMAT>
+注意
+这样的基本映像用于生成克隆映像。因此，确保这些文件是只读的并且永远不会被修改非常重要。后端将访问模式更改为 0444，并设置不可变标志
+（chattr +i），如果存储支持该标志。
+
+7.5.3 存储功能
+如上所述，大多数文件系统默认不支持快照。为了解决这个问题，此后端可以使用 qcow2 内部快照功能。
+克隆也是如此。后端使用 qcow2 基本映像功能来创建克隆。
+表 7.3：后端 dir 的存储功能 7.5.4 示例
+Content types Image formats Shared Snapshots Clones
+images
+rootdir
+vztmpl iso
+backup
+snippets
+请使用以下命令在 local 存储上分配一个 4GB 的映像：
+pvesm alloc local 100 vm-100-disk10.raw 4G
+Formatting ’/var/lib/vz/images/100/vm-100-disk10.raw’, fmt=raw size -=4294967296
+successfully created ’local:100/vm-100-disk10.raw’
+注意
+映像名称必须符合上述命名约定。
+实际的文件系统路径显示为：
+pvesm path local:100/vm-100-disk10.raw
+/var/lib/vz/images/100/vm-100-disk10.raw
+您可以使用以下命令删除映像：
+pvesm free local:100/vm-100-disk10.raw
+
+7.6 NFS 后端
+存储池类型：nfs
+NFS 后端基于目录后端，因此它们具有大部分共同属性。目录布局和文件命名约定相同。
+主要优点是您可以直接配置 NFS 服务器属性，因此后端可以自动挂载共享。无需修改 /etc/fstab。后端还可以测试服务器是否在线，并提供一种查询服务器导出共享的方法。
+
+7.6.1 配置
+后端支持所有常见的存储属性，除了始终设置的共享标志之外。此外，以下属性用于配置 NFS 服务器：
+server
+服务器 IP 或 DNS 名称。为避免 DNS 查找延迟，通常最好使用 IP 地址而不是 DNS 名称 - 除非您有非常可靠的 DNS 服务器，或者在本地 /etc/hosts 文件中列出服务器。
+export
+NFS 导出路径（如 pvesm nfsscan 所示）。
+您还可以设置 NFS 挂载选项：
+path
+本地挂载点（默认为 /mnt/pve/<STORAGE_ID>/）。
+content-dirs
+默认目录布局的覆盖。可选。
+options
+NFS 挂载选项（参见 man nfs）。
+配置示例 (/etc/pve/storage.cfg)
+nfs: iso-templates
+path /mnt/pve/iso-templates
+server 10.0.0.10
+export /space/iso-templates
+options vers=3,soft
+content iso,vztmpl
+提示
+在 NFS 请求超时后，默认情况下 NFS 请求将无限期重试。这可能导致客户端意外挂起。对于只读内容，考虑使用 NFS soft 选项是值得的，它将重试次数限制为三次。
+
+7.6.2 存储功能
+NFS 不支持快照，但后端使用 qcow2 功能来实现快照和克隆。
+Table 7.4: Storage features for backend nfs
+Content types Image formats Shared Snapshots Clones
+images
+rootdir
+vztmpl iso
+backup
+snippets
+
+7.6.3 示例
+您可以使用以下命令获取导出的 NFS 共享列表：
+pvesm nfsscan <server>
+
+7.7 CIFS 后端
+存储池类型：cifs
+CIFS 后端扩展了目录后端，因此不需要手动设置 CIFS 挂载。
+可以直接通过 Proxmox VE API 或 WebUI 添加此类存储，同时具有我们所有的后端优势，如服务器心跳检查或导出共享的舒适选择。
+
+7.7.1 配置
+后端支持所有常见的存储属性，除了始终设置的共享标志之外。此外，还提供以下 CIFS 特殊属性：
+server
+服务器 IP 或 DNS 名称。必需的。
+提示
+为避免 DNS 查找延迟，通常最好使用 IP 地址而不是 DNS 名称 - 除非您有非常可靠的 DNS 服务器，或者在本地 /etc/hosts 文件中列出服务器。
+share
+要使用的 CIFS 共享（使用 pvesm scan cifs <address> 或 WebUI 获取可用的共享）。必需的。
+username
+CIFS 存储的用户名。可选，默认为“guest”。
+password
+用户密码。可选。它将保存在仅 root 可读的文件中 (/etc/pve/priv/storage/<domain)。
+设置此存储的用户域（工作组）。可选。
+smbversion
+SMB 协议版本。可选，默认为 3。由于安全问题，不支持 SMB1。
+path
+本地挂载点。可选，默认为 /mnt/pve/<STORAGE_ID>/。
+content-dirs
+用于覆盖默认目录布局的设置。可选。
+subdir
+要挂载的共享的子目录。可选，默认为共享的根目录。
+配置示例 (/etc/pve/storage.cfg)
+cifs: 备份
+path /mnt/pve/backup
+server 10.0.0.11
+share VMData
+content 备份
+username anna
+smbversion 3
+subdir /data
+
+7.7.2 存储功能
+CIFS 不支持在存储级别上进行快照。但是，如果您仍然希望具有快照和克隆功能，可以使用 qcow2 支持文件。
+表 7.5：CIFS 后端的存储功能
+Content types Image formats Shared Snapshots Clones
+images
+rootdir
+vztmpl iso
+backup
+snippets
+raw qcow2
+vmdk
+yes qcow2 qcow2
+
+7.7.3 示例
+您可以使用以下命令获取导出的 CIFS 共享列表：
+pvesm scan cifs <server> [--username <username>] [--password]
+然后，您可以将此共享添加为整个 Proxmox VE 集群的存储：
+pvesm add cifs <storagename> --server <server> --share <share> [-- -
+username <username>] [--password]
+
+7.8 Proxmox 备份服务器
+存储池类型：pbs
+此后端允许将 Proxmox 备份服务器直接集成到 Proxmox VE 中，就像任何其他存储一样。可以通过 Proxmox VE API、CLI 或 Web 界面直接添加 Proxmox 备份存储。
+
+7.8.1 配置
+该后端支持所有常见的存储属性，除了始终设置的共享标志。此外，还提供了一些特定于 Proxmox 备份服务器的属性：
+server
+服务器 IP 或 DNS 名称。必需。
+username
+Proxmox 备份服务器存储的用户名。必需。
+提示
+不要忘记将领域添加到用户名中。例如，root@pam 或 archiver@pbs。
+password
+用户密码。该值将保存在 /etc/pve/priv/storage/<STORAGE-ID> 下的一个文件中，访问受限于 root 用户。必需。
+datastore
+要使用的 Proxmox 备份服务器数据存储的 ID。必需。
+fingerprint
+Proxmox 备份服务器 API TLS 证书的指纹。您可以在服务器仪表板中获取它，或者使用 proxmox-backup-manager cert info 命令。
+对于自签名证书或主机不信任服务器 CA 的任何其他证书，此项为必需。
+加密密钥
+用于从客户端对备份数据进行加密的密钥。目前仅支持无密码保护的密钥（无密钥派生函数（kdf））。
+将保存在 /etc/pve/priv/storage/<STORAGE- 下的一个文件中，访问受限于 root 用户。
+使用魔术值 autogen 自动使用 proxmox-backup-client key create --kdf none <path> 生成新密钥。可选。
+master-pubkey
+用于加密备份加密密钥的公共 RSA 密钥，作为备份任务的一部分。加密副本将附加到备份中，并存储在 Proxmox 备份服务器实例中以备恢复使用。可选，需要加密密钥。
+配置示例（/etc/pve/storage.cfg）
+pbs：备份
+数据存储 主要
+服务器 enya.proxmox.com
+内容备份
+指纹 09:54:ef:..snip..:88:af:47:fe:4c:3b:cf:8b:26:88:0b:4e:3 -
+c:b2
+修剪备份 keep-all=1
+用户名 archiver@pbs
+
+7.8.2 存储功能
+Proxmox 备份服务器仅支持备份，它们可以是块级别或文件级别的。Proxmox VE 对虚拟机使用块级别，对容器使用文件级别。
+表 7.6：后端 pbs 的存储功能
+内容类型 图像格式 共享 快照 克隆
+备份 n/a 是 n/a n/a
+
+7.8.3 加密
+可选地，您可以使用 GCM 模式下的 AES-256 配置客户端加密。加密可以通过网络界面或在命令行界面上使用 encryption-key 选项（见上文）进行配置。
+密钥将保存在文件 /etc/pve/priv/storage/<STORAGE-ID>.enc 中，该文件仅对 root 用户可访问。
+警告
+没有密钥，备份将无法访问。因此，您应该将密钥整理并存放在与备份内容分开的地方。例如，您可能会使用系统上的密钥备份整个系统。
+然后，如果系统因任何原因变得无法访问并需要还原，这将不可能实现，因为加密密钥将随着损坏的系统丢失。
+建议您将密钥保存在安全但易于访问的地方，以便快速进行灾难恢复。因此，将密钥存储在密码管理器中是最好的选择，它可以立即恢复。
+作为备份，您还应将密钥保存到 USB 驱动器中并将其存储在安全的地方。这样，它与任何系统分离，但在紧急情况下仍然容易恢复。
+最后，在为最坏的情况做准备时，您还应考虑将密钥的纸质副本锁在安全的地方。
+可以使用 paperkey 子命令创建密钥的 QR 编码版本。以下命令将 paperkey 命令的输出发送到文本文件，以便轻松打印。
+proxmox-backup-client key paperkey /etc/pve/priv/storage/<STORAGE-ID>.enc -
+--output-format text > qrkey.txt
+另外，可以使用单个 RSA 主密钥对来进行密钥恢复：配置所有执行加密备份的客户端使用单个公共主密钥，所有后续的加密备份将包含一个用 RSA 加密的 AES 
+加密密钥副本。相应的私有主密钥允许在客户端系统不再可用的情况下恢复 AES 密钥并解密备份。
+警告
+对于主密钥对，适用与常规加密密钥相同的保管规则。没有私钥副本就无法恢复！ paperkey 命令支持为私有主密钥生成纸质副本以便存储在安全的实体位置。
+由于加密是在客户端管理的，您可以在服务器上使用相同的数据存储进行非加密备份和加密备份，即使它们使用不同的密钥进行加密。
+然而，不同密钥之间的备份之间无法进行重复数据删除，因此通常最好创建单独的数据存储。
+注意
+如果没有从中受益的情况，请不要使用加密，例如，在受信任的网络中本地运行服务器。从未加密的备份中恢复数据总是更容易。
+
+7.8.4 示例：通过 CLI 添加存储
+然后，您可以使用以下命令将此共享作为存储添加到整个 Proxmox VE 集群中：
+# pvesm add pbs <存储名称> --server <服务器> --datastore <数据存储> --username <用户名> --password --fingerprint <指纹>
+用实际值替换 <存储名称>、<服务器>、<数据存储>、<用户名> 和 <指纹>。当你配置完毕后，你可以在整个 Proxmox VE 集群中使用这个存储。
+
+7.9 GlusterFS 后端
+存储池类型：glusterfs
+GlusterFS 是一种可扩展的网络文件系统。该系统采用模块化设计，在商用硬件上运行，并可以以低成本提供高可用的企业存储。这种系统能够扩展到数千兆字节，并能处理数千个客户端。
+注意
+在节点/砖块崩溃后，GlusterFS 会进行完整的 rsync 以确保数据一致性。对于大文件来说，这可能需要很长时间，因此此后端不适合存储大型虚拟机映像。
+
+7.9.1 配置
+后端支持所有常见的存储属性，并添加了以下 GlusterFS 特定选项：
+server
+GlusterFS volfile 服务器 IP 或 DNS 名称。
+server2
+备份 volfile 服务器 IP 或 DNS 名称。
+volume
+GlusterFS 卷。
+transport
+GlusterFS 传输：tcp、unix 或 rdma
+配置示例 (/etc/pve/storage.cfg)
+glusterfs: Gluster
+server 10.2.3.4
+server2 10.2.3.5
+volume glustervol
+content images,iso
+
+7.9.2 文件命名约定
+目录布局和文件命名约定继承自 dir 后端。
+
+7.9.3 存储功能
+存储提供文件级接口，但没有原生的快照/克隆实现。
+Table 7.7: Storage features for backend glusterfs
+Content types Image formats Shared Snapshots Clones
+images
+vztmpl iso
+backup
+snippets
+raw qcow2
+vmdk
+yes qcow2 qcow2
+
+7.10 本地 ZFS 池后端
+存储池类型：zfspool
+此后端允许您访问本地 ZFS 池（或这些池内的 ZFS 文件系统）。
+
+7.10.1 配置
+后端支持通用的存储属性 content、nodes、disable 以及以下 ZFS 特定属性：
+pool
+选择 ZFS 池/文件系统。所有分配都在该池内完成。
+blocksize
+设置 ZFS 块大小参数。
+sparse
+使用 ZFS 稀疏分配。稀疏卷是预留不等于卷大小的卷。
+mountpoint
+ZFS 池/文件系统的挂载点。更改此设置不会影响 zfs 看到的数据集的挂载点属性。默认为 /<pool>。
+配置示例 (/etc/pve/storage.cfg)
+zfspool: vmdata
+pool tank/vmdata
+content rootdir,images
+sparse
+
+7.10.2 文件命名约定
+后端对 VM 镜像使用以下命名方案：
+vm-<VMID>-<NAME> // 普通 VM 镜像
+base-<VMID>-<NAME> // 模板 VM 镜像（只读）
+subvol-<VMID>-<NAME> // 子卷（容器的 ZFS 文件系统）
+<VMID>
+这里指定所有者 VM。
+<NAME>
+这可以是一个没有空格的任意名称（ASCII）。后端默认使用 disk[N]，其中 [N] 替换为一个整数以使名称唯一。
+
+7.10.3 存储功能
+关于快照和克隆，ZFS 可能是最先进的存储类型。后端对于 VM 镜像（格式为 raw）和容器数据（格式为 subvol）都使用 ZFS 数据集。ZFS 属性从父数据集继承，因此您可以在父数据集上简单地设置默认值。
+表 7.8：后端 zfs 的存储功能
+内容类型 图像格式 共享 快照 克隆
+images
+rootdir
+raw subvol no yes yes
+
+7.10.4 示例
+建议创建一个额外的 ZFS 文件系统来存储您的 VM 镜像：
+zfs create tank/vmdata
+要在新分配的文件系统上启用压缩：
+zfs set compression=on tank/vmdata
+您可以使用以下命令获取可用的 ZFS 文件系统列表：
+pvesm zfsscan
+
+7.11 LVM 后端
+存储池类型：lvm
+LVM 是硬盘和分区上的一个轻量级软件层。它可以用于将可用磁盘空间划分为较小的逻辑卷。LVM 在 Linux 上广泛使用，并且使硬盘管理变得更容易。
+另一个用例是将 LVM 放在大型 iSCSI LUN 之上。这样，您可以轻松管理该 iSCSI LUN 上的空间，否则无法实现，因为 iSCSI 规范没有定义空间分配的管理接口。
+
+7.11.1 配置
+LVM 后端支持通用存储属性 content, nodes, disable 以及以下 LVM 特定属性：
+vgname
+LVM 卷组名称。这必须指向一个现有的卷组。
+base
+基本卷。在访问存储之前，此卷将自动激活。这在 LVM 卷组位于远程 iSCSI 服务器上时非常有用。
+saferemove
+删除 LV 时清零数据。在删除卷时，确保所有数据被擦除。
+saferemove_throughput
+擦除吞吐量（cstream -t 参数值）。
+配置示例（/etc/pve/storage.cfg）
+lvm: myspace
+vgname myspace
+content rootdir,images
+
+7.11.2 文件命名约定
+后端基本上使用与 ZFS 池后端相同的命名约定。
+vm-<VMID>-<NAME> // 普通 VM 镜像
+
+7.11.3 存储功能
+LVM 是典型的块存储，但此后端不支持快照和克隆。不幸的是，普通的 LVM 快照效率相当低，因为它们会在快照时间内干扰整个卷组上的所有写入。
+一个很大的优点是您可以将其用于共享存储之上，例如 iSCSI LUN。后端本身实现了适当的集群范围锁定。
+提示
+较新的 LVM-thin 后端允许快照和克隆，但不支持共享存储。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
