@@ -1,2 +1,208 @@
 proxmox7-4-8
 
+第8章
+部署超融合 Ceph 集群 Proxmox VE 将您的计算和存储系统统一起来，也就是说，您可以在集群中使用相同的物理节点进行计算
+（处理 VM 和容器）和复制存储。传统的计算和存储资源隔离可以整合到一个超融合设备中。单独的存储网络（SAN）和通过网络连接的存储（NAS）消失。通过集成 
+Ceph，一个开源的软件定义存储平台，Proxmox VE 能够在虚拟机管理程序节点上直接运行和管理 Ceph 存储。
+Ceph 是一个分布式对象存储和文件系统，旨在提供卓越的性能、可靠性和可扩展性。
+CEPH 在 PROXMOX VE 上的一些优势包括：
+    通过 CLI 和 GUI 轻松设置和管理
+    瘦分配
+    快照支持
+    自我修复
+    可扩展到艾字节级别
+    设置具有不同性能和冗余特性的存储池
+    数据被复制，使其具有容错能力
+    运行在商用硬件上
+    无需硬件 RAID 控制器
+    开源
+
+对于中小型部署，可以直接在您的 Proxmox VE 集群节点上安装用于 RADOS 块设备（RBD）的 Ceph 服务器（请参见 Ceph RADOS 块设备（RBD）第 7.15 节）。
+最近的硬件具有大量的 CPU 功能和 RAM，因此可以在同一节点上运行存储服务和 VM。
+为简化管理，我们提供了 pveceph - 一个用于在 Proxmox VE 节点上安装和管理 Ceph 服务的工具。
+CEPH 包含多个守护程序，用于作为 RBD 存储：
+    Ceph 监视器（ceph-mon）
+    Ceph 管理器（ceph-mgr）
+    Ceph OSD（ceph-osd; 对象存储守护程序）
+提示
+我们强烈建议熟悉 Ceph a，其架构 b 和词汇 c。
+a Ceph 简介 https://docs.ceph.com/en/quincy/start/intro/
+b Ceph 架构 https://docs.ceph.com/en/quincy/architecture/
+c Ceph 术语表 https://docs.ceph.com/en/quincy/glossary
+
+8.1 前提条件
+要构建一个超融合的 Proxmox + Ceph 集群，您必须至少使用三个（最好是相同的）服务器进行设置。
+还要查看 Ceph 官网的建议。
+CPU
+高 CPU 核心频率可以降低延迟，因此应该优先选择。简单地说，您应该为每个 Ceph 服务分配一个 CPU 核心（或线程），以提供足够的资源来实现稳定且持久的 Ceph 性能。
+内存
+特别是在超融合设置中，需要仔细监控内存消耗。除了预测虚拟机和容器的内存使用量之外，您还必须确保为 Ceph 提供足够的内存，以提供出色且稳定的性能。
+根据经验，对于大约 1 TiB 的数据，OSD 将使用 1 GiB 的内存。特别是在恢复、重新平衡或回填期间。
+守护进程本身还将使用额外的内存。守护进程的 Bluestore 后端默认需要 3-5 GiB 的内存（可调）。相比之下，传统的 Filestore 后端使用操作系统页面缓存，内存消耗通常与 OSD 
+守护程序的 PG 数量有关。
+网络
+我们建议至少使用 10 GbE 或更高的网络带宽，专门用于 Ceph。如果没有 10 GbE 交换机可用，网状网络设置 1 也是一种选择。
+特别是在恢复期间，流量的增加将干扰同一网络上的其他服务，甚至可能破坏 Proxmox VE 集群堆栈。
+此外，您应该估算您的带宽需求。虽然一台 HDD 可能无法饱和 1 Gb 链路，但每个节点的多个 HDD OSD 可以，而且现代 NVMe SSD 甚至会很快饱和 10 Gbps 
+的带宽。部署更高带宽的网络将确保这不会成为瓶颈，也不会在短时间内成为瓶颈。25、40 甚至 100 Gbps 是可能的。
+磁盘
+在规划 Ceph 集群的大小时，考虑恢复时间非常重要。特别是对于小型集群，恢复可能需要很长时间。建议您在小型设置中使用 SSD 而不是 HDD 
+以减少恢复时间，从而最大限度地降低恢复期间发生后续故障事件的可能性。
+一般来说，SSD 将比传统磁盘提供更多的 IOPS。考虑到这一点，除了更高的成本之外，实现基于类的第 8.7 节池分离可能是有意义的。
+另一种加速 OSD 的方法是将更快的磁盘用作日志或 DB/预写式日志设备，请参见创建 Ceph OSD 第 8.5 节。如果为多个 OSD 使用更快的磁盘，则必须选择 OSD 和 WAL / 
+DB（或日志）磁盘之间的适当平衡，否则更快的磁盘将成为所有链接 OSD 的瓶颈。
+除磁盘类型外，Ceph 在每个节点中具有相等大小和分布数量的磁盘时性能最佳。例如，每个节点内有 4 x 500 GB 磁盘比单个 1 TB 和三个 250 GB 磁盘的混合设置要好。
+您还需要平衡 OSD 数量和单个 OSD 容量。更大的容量允许您增加存储密度，但这也意味着单个 OSD 故障会迫使 Ceph 一次恢复更多数据。
+避免 RAID
+由于 Ceph 处理数据对象冗余以及对磁盘（OSD）的多个并行写操作，因此通常使用 RAID 控制器不会提高性能或可用性。相反，Ceph 旨在自己处理整个磁盘，而不需要中间的抽象。
+RAID 控制器不是为 Ceph 工作负载设计的，可能会使事情变得复杂，有时甚至会降低性能，因为它们的写入和缓存算法可能会干扰 Ceph 的算法。
+1 Ceph 服务器的完全网状网络 https://pve.proxmox.com/wiki/Full_Mesh_Network_for_Ceph_Server
+警告
+避免使用 RAID 控制器。请改用主机总线适配器（HBA）。
+注意
+以上建议应被视为选择硬件的粗略指南。因此，仍然有必要将其调整以适应您的特定需求。您应该测试您的设置并持续监控健康和性能。
+
+8.2 初始 Ceph 安装与配置
+
+8.2.1 使用基于 Web 的向导 通过 Proxmox VE，您可以轻松使用 Ceph 的安装向导。单击群集节点之一，然后导航到菜单树中的 Ceph 部分。如果尚未安装 
+Ceph，您将看到一个提示提供安装。
+向导分为多个部分，每个部分都需要成功完成，才能使用 Ceph。首先，您需要选择要安装的 Ceph 版本。如果这是您安装 Ceph 的第一个节点，请选择其他节点或最新版本。
+启动安装后，向导将从 Proxmox VE 的 Ceph 存储库下载并安装所有所需的软件包。安装步骤完成后，您需要创建配置。
+此步骤每个群集只需要执行一次，因为此配置会通过 Proxmox VE 的集群配置文件系统（pmxcfs）第 6 章自动分发给所有剩余的群集成员。
+配置步骤包括以下设置：
+• 公共网络：您可以为 Ceph 设置专用网络。此设置是必需的。强烈建议将您的 Ceph 流量分开。否则，它可能会对其他延迟相关服务造成麻烦，
+例如，集群通信可能会降低 Ceph 的性能。
+• 集群网络：作为可选步骤，您甚至可以进一步分开 OSD 第 8.5 节 复制和心跳流量。这将减轻公共网络的负担，并可能导致显著的性能改进，特别是在大型集群中。
+您还有两个选项，这些选项被认为是高级的，因此只有在您知道您在做什么的情况下才应更改。
+• 副本数量：定义对象复制的次数
+• 最小副本数：定义 I/O 标记为完成所需的最小副本数。
+此外，您需要选择您的第一个监视器节点。这个步骤是必需的。
+就是这样。您现在应该在最后一步看到一个成功页面，并提供有关如何继续操作的进一步说明。
+您的系统现在已准备好开始使用 Ceph。要开始使用，您需要创建一些其他监视器第 8.3 节，OSD 第 8.5 节和至少一个池第 8.6 节。
+本章其余部分将指导您充分利用基于 Proxmox VE 的 Ceph 设置。这包括前面提到的提示以及更多内容，例如 CephFS 第 8.9 节，这是对您的新 Ceph 集群的有益补充。
+
+8.2.2 通过 CLI 安装 Ceph 包
+作为可用于 Web 界面的推荐的 Proxmox VE Ceph 安装向导的替代方法，您可以在每个节点上使用以下 CLI 命令：
+pveceph install
+这将在 /etc/apt/sources.list.d/ceph.list 中设置 apt 软件包存储库并安装所需的软件。
+
+8.2.3 通过 CLI 进行初始 Ceph 配置
+使用 Proxmox VE Ceph 安装向导（推荐）或在一个节点上运行以下命令：
+pveceph init --network 10.10.10.0/24
+这将在 /etc/pve/ceph.conf 中创建一个初始配置，并为 Ceph 设置一个专用网络。此文件会自动分发给所有 Proxmox VE 节点，使用 pmxcfs 第 6 章。
+该命令还会在 /etc/ceph/ceph.conf 中创建一个符号链接，该链接指向该文件。因此，您可以简单地运行 Ceph 命令，而无需指定配置文件。
+
+8.3 Ceph 监视器
+Ceph 监视器（MON）2 保留了集群映射的主副本。为了实现高可用性，您至少需要 3 个监视器。如果您使用了安装向导，将已安装一个监视器。
+只要您的集群规模较小，就不需要超过 3 个监视器。只有真正大型的集群才需要超过这个数量。
+
+8.3.1 创建监视器
+在您想要放置监视器的每个节点上（建议使用三个监视器），通过 GUI 中的 Ceph！监视器选项卡或运行以下命令创建一个：
+pveceph mon create
+2Ceph 监视器 https://docs.ceph.com/en/quincy/start/intro/
+
+8.3.2 销毁监视器
+要通过 GUI 删除 Ceph 监视器，请首先在树视图中选择一个节点，然后转到 Ceph！监视器面板。选择 MON 并点击 Destroy 按钮。
+要通过 CLI 删除 Ceph 监视器，请首先连接到运行 MON 的节点。然后执行以下命令：
+pveceph mon destroy
+注意
+至少需要三个监视器来达到法定人数。
+
+8.4 Ceph 管理器
+管理器守护进程与监视器一起运行。它提供了一个接口来监控集群。自 Ceph Luminous 版本发布以来，至少需要一个 ceph-mgr 3 守护进程。
+
+8.4.1 创建管理器
+可以安装多个管理器，但在任何给定时间只有一个管理器处于活动状态。
+pveceph mgr create
+注意
+建议在监视器节点上安装 Ceph 管理器。为了高可用性，请安装多个管理器。
+
+8.4.2 销毁管理器
+要通过 GUI 删除 Ceph 管理器，请首先在树视图中选择一个节点，然后转到 Ceph！监视器面板。选择 Manager 并点击 Destroy 按钮。
+要通过 CLI 删除 Ceph 监视器，请首先连接到运行 Manager 的节点。然后执行以下命令：
+pveceph mgr destroy
+注意
+虽然管理器不是硬依赖项，但它对于 Ceph 集群至关重要，因为它处理了诸如 PG 自动缩放、设备健康监控、遥测等重要功能。
+3Ceph 管理器 https://docs.ceph.com/en/quincy/mgr/
+
+8.5 Ceph OSDs
+Ceph 对象存储守护程序 (Object Storage Daemons, OSD) 通过网络存储 Ceph 对象。建议每个物理磁盘使用一个 OSD。
+
+8.5.1 创建 OSD
+您可以通过 Proxmox VE web 界面或通过使用 pveceph 的 CLI 创建 OSD。例如：
+pveceph osd create /dev/sd[X]
+提示
+我们建议使用至少三个节点、至少 12 个 OSD 的 Ceph 集群，这些 OSD 在节点之间均匀分布。
+如果磁盘之前已被使用（例如，用于 ZFS 或作为 OSD），则首先需要擦除该使用的所有痕迹。要删除分区表、引导扇区和其他 OSD 残留，可以使用以下命令：
+ceph-volume lvm zap /dev/sd[X] --destroy
+警告
+上述命令将销毁磁盘上的所有数据！
+Ceph Bluestore
+从 Ceph Kraken 版本开始，引入了一种名为 Bluestore 4 的新 Ceph OSD 存储类型。从 Ceph Luminous 开始，创建 OSD 时默认使用此存储类型。
+pveceph osd create /dev/sd[X]
+Block.db 和 block.wal
+如果您希望为 OSD 使用单独的 DB/WAL 设备，可以通过 -db_dev 和 -wal_dev 选项指定。如果未单独指定，WAL 将与 DB 放在一起。
+pveceph osd create /dev/sd[X] -db_dev /dev/sd[Y] -wal_dev /dev/sd[Z]
+您可以分别使用 -db_size 和 -wal_size 参数直接选择这些大小。如果未给出这些参数，将按以下顺序使用值：
+• 来自 Ceph 配置的 bluestore_block_{db,wal}_size。。
+– 。。。数据库，osd 部分
+– 。。。数据库，全局部分
+– 。。。文件，osd 部分
+– 。。。文件，全局部分
+• OSD 大小的 10%（DB）/1%（WAL）
+注意
+DB 存储了 BlueStore 的内部元数据，而 WAL 是 BlueStore 的内部日志或预先写入的日志。建议使用快速的 SSD 或 NVRAM 以获得更好的性能。
+Ceph Filestore
+在 Ceph Luminous 之前，Filestore 用作 Ceph OSD 的默认存储类型。从 Ceph Nautilus 开始，Proxmox VE 不再支持使用 pveceph 创建此类 OSD。
+如果您仍然希望创建 filestore OSD，请直接使用 ceph-volume。
+ceph-volume lvm create --filestore --data /dev/sd[X] --journal /dev/sd[Y]
+4 Ceph Bluestore https://ceph.com/community/new-luminous-bluestore/
+
+8.5.2 销毁 OSD
+要通过 GUI 删除 OSD，首先在树视图中选择一个 Proxmox VE 节点，然后转到 Ceph！OSD 面板。然后选择要销毁的 OSD，单击 OUT 按钮。
+一旦 OSD 状态从 in 变为 out，请单击 STOP 按钮。最后，在状态从 up 变为 down 后，从 More 下拉菜单中选择 Destroy。
+要通过 CLI 删除 OSD，请运行以下命令。
+ceph osd out <ID>
+systemctl stop ceph-osd@<ID>.service
+注意
+第一个命令指示 Ceph 不将 OSD 包含在数据分发中。第二个命令停止 OSD 服务。直到此时，数据才会丢失。
+以下命令销毁 OSD。指定 -cleanup 选项以额外销毁分区表。
+pveceph osd destroy <ID>
+警告
+上述命令将销毁磁盘上的所有数据！
+
+8.6 Ceph Pools
+一个存储池是用于存储对象的逻辑组。它包含一组称为放置组（PG，pg_num）的对象。
+
+8.6.1 创建和编辑存储池
+您可以从命令行或位于 Ceph！Pools 下的任何 Proxmox VE 主机的 web 界面创建和编辑存储池。
+当没有给出选项时，我们设置默认值为 128 个 PG，3 个副本的大小和 2 个副本的最小大小，以确保在任何 OSD 失败时不会丢失数据。
+警告
+不要将 min_size 设置为 1。具有 min_size 为 1 的复制池允许在对象只有 1 个副本时进行 I/O，这可能导致数据丢失、不完整的 PG 或未找到的对象。
+建议您启用 PG-Autoscaler 或根据您的设置计算 PG 数量。您可以在线找到公式和 PG 计算器5。从 Ceph Nautilus 开始，您可以在设置后更改 PG 数量6。
+5 PG 计算器 https://web.archive.org/web/20210301111112/http://ceph.com/pgcalc/
+6 放置组 https://docs.ceph.com/en/quincy/rados/operations/placement-groups/
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
