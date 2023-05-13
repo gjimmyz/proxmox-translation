@@ -1,1 +1,135 @@
 proxmox7-4-6
+
+第6章
+Proxmox 集群文件系统 (pmxcfs)
+Proxmox 集群文件系统（简称 "pmxcfs"）是一个数据库驱动的文件系统，用于存储配置文件，通过 corosync 实时复制到所有集群节点。
+我们用它来存储所有与 PVE 相关的配置文件。
+尽管文件系统将所有数据存储在磁盘上的持久化数据库中，但数据的副本位于 RAM 中。这对最大大小施加了限制，目前为 30MB。这仍然足够存储几千个虚拟机的配置。
+此系统提供以下优势：
+• 实时将所有配置无缝复制到所有节点
+• 提供强一致性检查，以避免重复的虚拟机 ID
+• 当节点失去法定人数时为只读
+• 自动更新 corosync 集群配置到所有节点
+• 包括一个分布式锁定机制
+
+6.1 POSIX 兼容性
+该文件系统基于 FUSE，因此行为类似于 POSIX。但是，由于我们不需要某些功能，因此并未实现它们：
+• 您可以生成普通文件和目录，但不能生成符号链接等
+• 不能重命名非空目录（这样可以更容易地保证 VMID 是唯一的）
+• 无法更改文件权限（权限基于路径）
+• O_EXCL 创建不是原子的（类似旧的 NFS）
+• O_TRUNC 创建不是原子的（FUSE 限制）
+
+6.2 文件访问权限
+所有文件和目录都由 root 用户拥有，且属于 www-data 组。只有 root 具有写入权限，但 www-data 组可以读取大多数文件。以下路径下的文件仅由 root 用户访问：
+/etc/pve/priv/
+/etc/pve/nodes/${NAME}/priv/
+
+6.3 技术
+我们使用 Corosync 集群引擎进行集群通信，并使用 SQlite 作为数据库文件。文件系统在用户空间中使用 FUSE 实现。
+
+6.4 文件系统布局
+文件系统挂载在：
+/etc/pve
+
+6.4.1 文件
+uthkey.pub Public key used by the ticket system
+ceph.conf Ceph configuration file (note: /etc/ceph/ceph.conf
+is a symbolic link to this)
+corosync.conf Corosync cluster configuration file (prior to
+Proxmox VE 4.x, this file was called cluster.conf)
+datacenter.cfg Proxmox VE data center-wide configuration
+(keyboard layout, proxy, . . . )
+domains.cfg Proxmox VE authentication domains
+firewall/cluster.fw Firewall configuration applied to all nodes
+firewall/<NAME>.fw Firewall configuration for individual nodes
+firewall/<VMID>.fw Firewall configuration for VMs and containers
+ha/crm_commands Displays HA operations that are currently being
+carried out by the CRM
+ha/manager_status JSON-formatted information regarding HA
+services on the cluster
+ha/resources.cfg Resources managed by high availability, and their
+current state
+nodes/<NAME>/config Node-specific configuration
+nodes/<NAME>/lxc/<VMID>.conf VM configuration data for LXC containers
+nodes/<NAME>/openvz/ Prior to PVE 4.0, used for container configuration
+data (deprecated, removed soon)
+nodes/<NAME>/pve-ssl.key Private SSL key for pve-ssl.pem
+nodes/<NAME>/pve-ssl.pem Public SSL certificate for web server (signed by
+cluster CA)
+nodes/<NAME>/pveproxy-ssl.key Private SSL key for pveproxy-ssl.pem
+(optional)
+nodes/<NAME>/pveproxy-ssl.pem Public SSL certificate (chain) for web server
+(optional override for pve-ssl.pem)
+nodes/<NAME>/qemu-server/<VMID>.confVM configuration data for KVM VMs
+priv/authkey.key Private key used by ticket system
+priv/authorized_keys SSH keys of cluster members for authentication
+priv/ceph* Ceph authentication keys and associated
+capabilities
+priv/known_hosts SSH keys of the cluster members for verification
+priv/lock/* Lock files used by various services to ensure safe
+cluster-wide operations
+priv/pve-root-ca.key Private key of cluster CA
+priv/shadow.cfg Shadow password file for PVE Realm users
+priv/storage/<STORAGE-ID>.pw Contains the password of a storage in plain text
+priv/tfa.cfg Base64-encoded two-factor authentication
+configuration
+priv/token.cfg API token secrets of all tokens
+pve-root-ca.pem Public certificate of cluster CA
+pve-www.key Private key used for generating CSRF tokens
+sdn/* Shared configuration files for Software Defined
+Networking (SDN)
+status.cfg Proxmox VE external metrics server configuration
+storage.cfg Proxmox VE storage configuration
+user.cfg Proxmox VE access control configuration
+(users/groups/. . . )
+virtual-guest/cpu-models.conf For storing custom CPU models
+vzdump.cron Cluster-wide vzdump backup-job schedule
+
+6.4.2 符号链接
+集群文件系统中的某些目录使用符号链接，以指向节点自己的配置文件。因此，下表中指向的文件在集群的每个节点上都是不同的文件。
+local nodes/<LOCAL_HOST_NAME>
+lxc nodes/<LOCAL_HOST_NAME>/lxc/
+openvz nodes/<LOCAL_HOST_NAME>/openvz/
+(deprecated, removed soon)
+qemu-server nodes/<LOCAL_HOST_NAME>/qemu-server/
+
+6.4.3 用于调试的特殊状态文件（JSON）
+.version File versions (to detect file modifications)
+.members Info about cluster members
+.vmlist List of all VMs
+.clusterlog Cluster log (last 50 entries
+.rrd RRD data (most recent entries)
+
+6.4.4 启用/禁用调试
+您可以使用以下命令启用详细的 syslog 消息：
+echo "1" >/etc/pve/.debug
+使用以下命令禁用详细的 syslog 消息：
+echo "0" >/etc/pve/.debug
+
+6.5 恢复
+如果您的 Proxmox VE 主机出现重大问题，例如硬件问题，将 pmxcfs 数据库文件 /var/lib/pve-cluster/config.db 复制并移动到新的 Proxmox VE 
+主机可能会有所帮助。在新主机上（没有运行任何东西），您需要停止 pve-cluster 服务并替换 config.db 文件（需要 0600 的权限）。
+接下来，根据丢失的 Proxmox VE 主机调整 /etc/hostname 和 /etc/hosts，然后重新启动并检查（别忘了您的 VM/CT 数据）。
+
+6.5 恢复
+如果您的 Proxmox VE 主机出现重大问题，例如硬件问题，将 pmxcfs 数据库文件 /var/lib/pve-cluster/config.db 复制并移动到新的 Proxmox VE 主机可能会有所帮助。在新主机上（没有运行任何东西），您需要停止 pve-cluster 服务并替换 config.db 文件（需要 0600 的权限）。
+接下来，根据丢失的 Proxmox VE 主机调整 /etc/hostname 和 /etc/hosts，然后重新启动并检查（别忘了您的 VM/CT 数据）。
+
+6.5.1 删除集群配置
+建议在从集群中删除节点后重新安装节点。这样可以确保销毁所有秘密的集群/ssh 密钥和任何共享配置数据。
+在某些情况下，您可能更喜欢将节点切换回本地模式，而不是重新安装，这在“无需重新安装分离节点”中进行了描述。
+
+6.5.2 从失败节点中恢复/移动客户机
+对于节点/<NAME>/qemu-server/（虚拟机）和节点/<NAME>/lxc/（容器）中的客户机配置文件，Proxmox VE 将包含节点 <NAME> 
+视为相应客户机的所有者。这个概念允许使用本地锁而不是昂贵的集群范围锁来防止并发客户机配置更改。
+因此，如果客户机的所有节点出现故障（例如，由于电源故障、防篱事件等），则无法进行常规迁移（即使所有磁盘位于共享存储上），因为这样的本地锁定（离线）所有节点无法获得。
+对于 HA 管理的客户机来说，这不是问题，因为 Proxmox VE 的高可用性堆栈包括必要的（集群范围内）锁定和看门狗功能，以确保客户机从防篱节点正确且自动恢复。
+如果非 HA 管理的客户机只有共享磁盘（以及在失败节点上仅可用的其他本地资源），则可以通过简单地将客户机配置文件从 /etc/pve/ 
+中的失败节点目录移动到在线节点目录（这样可以更改客户机的逻辑所有者或位置）来进行手动恢复。
+例如，从离线 node1 恢复 ID 为 100 的虚拟机到另一个节点 node2，可以通过在集群的任何成员节点上以 root 身份运行以下命令来完成：
+mv /etc/pve/nodes/node1/qemu-server/100.conf /etc/pve/nodes/node2/
+警告
+在像这样手动恢复客户机之前，请确保失败的源节点确实已关闭/隔离。否则，mv 命令将违反 Proxmox VE 的锁定原则，这可能导致意外后果。
+警告
+具有本地磁盘（或仅在离线节点上可用的其他本地资源）的客户机无法像这样恢复。要么等待失败的节点重新加入集群，要么从备份中恢复此类客户机。
