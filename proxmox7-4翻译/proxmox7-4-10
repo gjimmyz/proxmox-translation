@@ -882,6 +882,857 @@ autostart: <boolean> (默认 = 0)
 崩溃后自动重启（当前被忽略）。
 balloon: <integer> (0 - N)
 以 MiB 为单位的 VM 目标 RAM 量。使用零禁用气球驱动。
+bios: <ovmf | seabios> (默认 = seabios)
+选择 BIOS 实现。
+boot: [[legacy=]<[acdn]{1,4}>] [,order=<device[;device...]>]
+指定客户机启动顺序。使用 order= 子属性，因为不使用键或 legacy= 已被弃用。
+legacy=<[acdn]{1,4}> (默认 = cdn)
+从软盘 (a)、硬盘 (c)、CD-ROM (d) 或网络 (n) 启动。已弃用，改用 order=。
+order=<device[;device...]>
+客户机将尝试按照这里出现的顺序从设备启动。
+将直接从磁盘、光驱和传递存储 USB 设备启动，NIC 将加载 PXE，PCIe 设备将表现为磁盘（例如 NVMe）或加载选项 ROM（例如 RAID 控制器、硬件 NIC）。
+请注意，只有此列表中的设备将被标记为可启动并由客户机固件（BIOS/UEFI）加载。如果需要多个磁盘进行启动（例如软件 RAID），则需要在此处指定所有磁盘。
+在给定时覆盖已弃用的 legacy=[acdn]* 值。
+bootdisk: (ide|sata|scsi|virtio)\d+
+启用从指定磁盘启动。已弃用：改用 boot: order=foo;bar。
+cdrom: <volume>
+这是 -ide2 选项的别名
+cicustom: [meta=<volume>] [,network=<volume>] [,user=<volume>]
+[,vendor=<volume>]
+cloud-init: 指定在启动时替换自动生成的文件。
+meta=<volume>
+指定包含通过 cloud-init 传递给 VM 的所有元数据的自定义文件。这是特定于提供商的，这意味着 configdrive2 和 nocloud 不同。
+network=<volume>
+传递包含所有网络数据的自定义文件通过 cloud-init 传递给 VM。
+user=<volume>
+传递包含所有用户数据的自定义文件通过 cloud-init 传递给 VM。
+vendor=<volume>
+传递包含所有供应商数据的自定义文件通过 cloud-init 传递给 VM。
+cipassword: <string>
+cloud-init: 分配给用户的密码。通常不建议使用这个。改用 ssh 密钥。还要注意，旧版本的 cloud-init 不支持哈希密码。
+citype: <configdrive2 | nocloud | opennebula>
+指定 cloud-init 配置格式。默认值取决于配置的操作系统类型（ostype）。对于 Linux，我们使用 nocloud 格式，对于 Windows，我们使用 configdrive2。
+ciuser: <string>
+cloud-init：要更改 ssh 密钥和密码的用户名，而不是映像配置的默认用户。
+cores: <integer> (1 - N) (默认 = 1)
+每个插槽的核心数。
+cpu：[[cputype=]<string>] [,flags=<+FLAG[;-FLAG...]>]
+[,hidden=<1|0>] [,hv-vendor-id=<vendor-id>]
+[,phys-bits=<8-64|host>] [,reported-model=<enum>]
+模拟的 CPU 类型。
+cputype=<string> (默认 = kvm64)
+模拟的 CPU 类型。可以是默认或自定义名称（自定义型号名称必须以 custom- 为前缀）。
+flags=<+FLAG[;-FLAG...]>
+由 ; 分隔的附加 CPU 标志列表。使用 +FLAG 启用，-FLAG 禁用标志。
+自定义 CPU 型号可以指定 QEMU/KVM 支持的任何标志，出于安全原因，VM 特定标志必须来自以下集合：
+pcid, spec-ctrl, ibpb, ssbd, virt-ssbd, amd-ssbd, amd-no-ssb, pdpe1gb, md-clear, hv-tlbflush, hv-evmcs, aes
+hidden=<boolean> (默认 = 0)
+不将其标识为 KVM 虚拟机。
+hv-vendor-id=<vendor-id>
+Hyper-V 供应商 ID。Windows 客户机中的一些驱动程序或程序需要特定的 ID。
+phys-bits=<8-64|host>
+报告给客户操作系统的物理内存地址位。应小于或等于主机的值。设置为 host 以使用来自主机 CPU 的值，但请注意，这样做将破坏对具有其他值的 CPU 的实时迁移。
+reported-model=<486 | Broadwell | Broadwell-IBRS |
+Broadwell-noTSX | Broadwell-noTSX-IBRS | Cascadelake-Server |
+Cascadelake-Server-noTSX | Conroe | EPYC | EPYC-IBPB |
+EPYC-Milan | EPYC-Rome | Haswell | Haswell-IBRS | Haswell-noTSX
+| Haswell-noTSX-IBRS | Icelake-Client | Icelake-Client-noTSX |
+Icelake-Server | Icelake-Server-noTSX | IvyBridge |
+IvyBridge-IBRS | KnightsMill | Nehalem | Nehalem-IBRS |
+Opteron_G1 | Opteron_G2 | Opteron_G3 | Opteron_G4 | Opteron_G5
+| Penryn | SandyBridge | SandyBridge-IBRS | Skylake-Client |
+Skylake-Client-IBRS | Skylake-Client-noTSX-IBRS |
+Skylake-Server | Skylake-Server-IBRS |
+Skylake-Server-noTSX-IBRS | Westmere | Westmere-IBRS | athlon |
+core2duo | coreduo | host | kvm32 | kvm64 | max | pentium |
+pentium2 | pentium3 | phenom | qemu32 | qemu64> (默认 = kvm64)
+报告给客户机的 CPU 型号和供应商。必须是 QEMU/KVM 支持的型号。只
+对于自定义 CPU 型号定义有效，缺省型号将始终向客户操作系统报告自身。
+cpulimit: <number> (0 - 128) (默认 = 0)
+CPU 使用限制。
+注意
+如果计算机有 2 个 CPU，那么它总共有 2 个 CPU 时间。值 0 表示没有 CPU 限制。
+cpuunits: <integer> (1 - 262144) (默认 = cgroup v1: 1024, cgroup v2: 100)
+VM 的 CPU 权重。参数用于内核公平调度器。数字越大，这个 VM 获得的 CPU 时间越多。数字与所有其他正在运行的 VM 的权重相关。
+description: <string>
+VM 的描述。显示在网络接口 VM 的摘要中。这将作为配置文件内的注释保存。
+efidisk0：[file=]<volume> [,efitype=<2m|4m>] [,format=<enum>]
+[,pre-enrolled-keys=<1|0>] [,size=<DiskSize>]
+配置用于存储 EFI 变量的磁盘。
+efitype=<2m | 4m> (默认 = 2m)
+OVMF EFI 变量的大小和类型。4m 较新，建议使用，并且需要安全启动。为了向后兼容，如果没有另外指定，则使用 2m。对于具有 arch=aarc64 (ARM) 的 VM 会被忽略。
+file=<volume>
+驱动器的背景卷。
+format=<cloop | cow | qcow | qcow2 | qed | raw | vmdk>
+驱动器背景文件的数据格式。
+pre-enrolled-keys=<boolean> (默认 = 0)
+如果与 efitype=4m 一起使用，则使用具有分发特定和已注册的 Microsoft 标准密钥的 EFI 变量模板。请注意，这将默认启用安全启动，尽管仍然可以从 VM 内部关闭。
+size=<DiskSize>
+磁盘大小。这仅仅是信息性的，没有影响。
+freeze: <boolean>
+在启动时冻结 CPU（使用 c 监视器命令开始执行）。
+hookscript: <string>
+在虚拟机生命周期的各个阶段执行的脚本。对于自定义 CPU 型号定义有效，缺省型号将始终向客户操作系统报告自身。
+cpulimit: <number> (0 - 128) (默认 = 0)
+CPU 使用限制。
+注意
+如果计算机有 2 个 CPU，那么它总共有 2 个 CPU 时间。值 0 表示没有 CPU 限制。
+cpuunits: <integer> (1 - 262144) (默认 = cgroup v1: 1024, cgroup v2: 100)
+VM 的 CPU 权重。参数用于内核公平调度器。数字越大，这个 VM 获得的 CPU 时间越多。数字与所有其他正在运行的 VM 的权重相关。
+description: <string>
+VM 的描述。显示在网络接口 VM 的摘要中。这将作为配置文件内的注释保存。
+efidisk0：[file=]<volume> [,efitype=<2m|4m>] [,format=<enum>]
+[,pre-enrolled-keys=<1|0>] [,size=<DiskSize>]
+配置用于存储 EFI 变量的磁盘。
+efitype=<2m | 4m> (默认 = 2m)
+OVMF EFI 变量的大小和类型。4m 较新，建议使用，并且需要安全启动。为了向后兼容，如果没有另外指定，则使用 2m。对于具有 arch=aarc64 (ARM) 的 VM 会被忽略。
+file=<volume>
+驱动器的背景卷。
+format=<cloop | cow | qcow | qcow2 | qed | raw | vmdk>
+驱动器背景文件的数据格式。
+pre-enrolled-keys=<boolean> (默认 = 0)
+如果与 efitype=4m 一起使用，则使用具有分发特定和已注册的 Microsoft 标准密钥的 EFI 变量模板。请注意，这将默认启用安全启动，尽管仍然可以从 VM 内部关闭。
+size=<DiskSize>
+磁盘大小。这仅仅是信息性的，没有影响。
+freeze: <boolean>
+在启动时冻结 CPU（使用 c 监视器命令开始执行）。
+hookscript: <string>
+在虚拟机生命周期的各个阶段执行的脚本。
+hostpci[n]: [host=]<HOSTPCIID[;HOSTPCIID2...]> [,device-id=<hex id>]
+[,legacy-igd=<1|0>] [,mdev=<string>] [,pcie=<1|0>] [,rombar=<1|0>]
+[,romfile=<string>] [,sub-device-id=<hex id>] [,sub-vendor-id=<hex
+id>] [,vendor-id=<hex id>] [,x-vga=<1|0>]
+将主机 PCI 设备映射到客户机。
+注意
+此选项允许直接访问主机硬件。因此，不再可能迁移这样的机器 - 请特别小心使用。
+警告
+实验性！用户报告了此选项的问题。
+device-id=<hex id>
+覆盖对客户机可见的 PCI 设备 ID
+host=<HOSTPCIID[;HOSTPCIID2...]>
+主机 PCI 设备直通。主机的 PCI 设备的 PCI ID 或主机的 PCI 虚拟函数列表。HOSTPCIID 语法为：
+bus:dev.func（十六进制数字）
+您可以使用 lspci 命令列出现有的 PCI 设备。
+legacy-igd=<boolean> (默认 = 0)
+以传统 IGD 模式传递此设备，使其成为 VM 中的主要且独占的图形设备。需要 pc-i440fx 机器类型和将 VGA 设置为 none。
+mdev=<string>
+要使用的中介设备类型。在 VM 启动时将创建此类型的实例，并在 VM 停止时清理。
+pcie=<boolean> (默认 = 0)
+选择 PCI-express 总线（需要 q35 机器模型）。
+rombar=<boolean> (默认 = 1)
+指定设备的 ROM 是否在客户机的内存映射中可见。
+romfile=<string>
+自定义 pci 设备 rom 文件名（必须位于 /usr/share/kvm/ 中）。
+sub-device-id=<hex id>
+覆盖对客户机可见的 PCI 子系统设备 ID
+sub-vendor-id=<hex id>
+覆盖对客户机可见的 PCI 子系统厂商 ID
+vendor-id=<hex id>
+覆盖对客户机可见的 PCI 厂商 ID
+x-vga=<boolean> (默认 = 0)
+启用 vfio-vga 设备支持。
+hotplug: <string> (默认 = network,disk,usb)
+有选择地启用热插拔功能。这是一个用逗号分隔的热插拔功能列表：网络，磁盘，CPU，内存，USB 和 cloudinit。使用 0 完全禁用热插拔。
+将 1 用作值是默认网络，磁盘，USB 的别名。对于机器版本 >= 7.1 且 ostype 为 l26 或 windows > 7 的客户端，可以进行 USB 热插拔。
+hugepages: <1024 | 2 | any>
+启用/禁用大页面内存。
+ide[n]: [file=]<volume> [,aio=<native|threads|io_uring>]
+[,backup=<1|0>] [,bps=<bps>] [,bps_max_length=<seconds>]
+[,bps_rd=<bps>] [,bps_rd_max_length=<seconds>] [,bps_wr=<bps>]
+[,bps_wr_max_length=<seconds>] [,cache=<enum>] [,cyls=<integer>]
+[,detect_zeroes=<1|0>] [,discard=<ignore|on>] [,format=<enum>]
+[,heads=<integer>] [,iops=<iops>] [,iops_max=<iops>]
+[,iops_max_length=<seconds>] [,iops_rd=<iops>]
+[,iops_rd_max=<iops>] [,iops_rd_max_length=<seconds>]
+[,iops_wr=<iops>] [,iops_wr_max=<iops>]
+[,iops_wr_max_length=<seconds>] [,mbps=<mbps>] [,mbps_max=<mbps>]
+[,mbps_rd=<mbps>] [,mbps_rd_max=<mbps>] [,mbps_wr=<mbps>]
+[,mbps_wr_max=<mbps>] [,media=<cdrom|disk>] [,model=<model>]
+[,replicate=<1|0>] [,rerror=<ignore|report|stop>] [,secs=<integer>]
+[,serial=<serial>] [,shared=<1|0>] [,size=<DiskSize>]
+[,snapshot=<1|0>] [,ssd=<1|0>] [,trans=<none|lba|auto>]
+[,werror=<enum>] [,wwn=<wwn>]
+将卷用作 IDE 硬盘或 CD-ROM（n 为 0 到 3）。
+aio=<io_uring | native | threads>
+要使用的 AIO 类型。
+backup=<boolean>
+在进行备份时是否应包含该驱动器。
+bps=<bps>
+每秒字节的最大读/写速度。
+bps_max_length=<seconds>
+以秒为单位的 I/O 突发的最大长度。
+bps_rd=<bps>
+每秒字节的最大读取速度。
+bps_rd_max_length=<seconds>
+以秒为单位的读取 I/O 突发的最大长度。
+bps_wr=<bps>
+每秒字节的最大写入速度。
+bps_wr_max_length=<seconds>
+以秒为单位的写入 I/O 突发的最大长度。
+cache=<directsync | none | unsafe | writeback | writethrough>
+驱动器的缓存模式
+cyls=<integer>
+强制驱动器的物理几何具有特定的柱面数。
+detect_zeroes=<boolean>
+控制是否检测并尝试优化零的写入。
+discard=<ignore | on>
+控制是否将丢弃/修剪请求传递给底层存储。
+file=<volume>
+驱动器的后备卷。
+format=<cloop | cow | qcow | qcow2 | qed | raw | vmdk>
+驱动器的后备文件的数据格式。
+heads=<integer>
+强制驱动器的物理几何具有特定的磁头数。
+iops=<iops>
+每秒操作的最大读/写 I/O。
+iops_max=<iops>
+每秒操作的最大无限制读/写 I/O 池。
+iops_max_length=<seconds>
+以秒为单位的 I/O 突发的最大长度。
+iops_rd=<iops>
+每秒操作的最大读取 I/O。
+iops_rd_max=<iops>
+每秒操作的最大无限制读取 I/O 池。
+iops_rd_max_length=<seconds>
+以秒为单位的读取 I/O 突发的最大长度。
+iops_wr=<iops>
+每秒操作的最大写入 I/O。
+iops_wr_max=<iops>
+每秒操作的最大无限制写入 I/O 池。
+iops_wr_max_length=<seconds>
+以秒为单位的写入 I/O 突发的最大长度。
+mbps=<mbps>
+每秒兆字节的最大读/写速度。
+mbps_max=<mbps>
+每秒兆字节的最大无限制读/写池。
+mbps_rd=<mbps>
+每秒兆字节的最大读取速度。
+mbps_rd_max=<mbps>
+每秒兆字节的最大无限制读取池。
+mbps_wr=<mbps>
+每秒兆字节的最大写入速度。
+mbps_wr_max=<mbps>
+每秒兆字节的最大无限制写入池。
+media=<cdrom | disk> (默认 = disk)
+驱动器的媒体类型。
+model=<model>
+驱动器报告的型号名称，url-encoded，最长40个字节。
+replicate=<boolean> (默认 = 1)
+驱动器是否应考虑用于复制任务。
+rerror=<ignore | report | stop>
+读取错误操作。
+secs=<integer>
+强制驱动器的物理几何具有特定的扇区数。
+serial=<serial>
+驱动器报告的序列号，url-encoded，最长20个字节。
+shared=<boolean> (默认 = 0)
+将此本地管理的卷标记为所有节点上可用。
+警告
+此选项不会自动共享卷，它假定卷已经共享！
+size=<DiskSize>
+磁盘大小。这纯粹是信息性的，没有任何影响。
+snapshot=<boolean>
+控制 qemu 的快照模式功能。如果激活，对磁盘所做的更改将是临时的，并且在虚拟机关闭时将被丢弃。
+ssd=<boolean>
+是否将此驱动器暴露为SSD，而不是旋转硬盘。
+trans=<auto | lba | none>
+强制磁盘几何 BIOS 转换模式。
+werror=<enospc | ignore | report | stop>
+写入错误操作。
+wwn=<wwn>
+驱动器的全球唯一名称，以16字节十六进制字符串编码，前缀为 0x。
+ipconfig[n]: [gw=<GatewayIPv4>] [,gw6=<GatewayIPv6>]
+[,ip=<IPv4Format/CIDR>] [,ip6=<IPv6Format/CIDR>]
+cloud-init：为相应接口指定IP地址和网关。
+IP地址使用CIDR表示法，网关是可选的，但需要指定相同类型的IP。特殊字符串 dhcp 可用于使用 DHCP 的 IP 地址，在这种情况下不应提供显式网关。
+对于 IPv6，特殊字符串 auto 可用于使用无状态自动配置。这需要 cloud-init 19.4 或更新版本。
+如果启用了 cloud-init 且未指定 IPv4 或 IPv6 地址，则默认在 IPv4 上使用 dhcp。
+gw=<GatewayIPv4>
+IPv4 流量的默认网关。
+注意
+需要选项：ip
+gw6=<GatewayIPv6>
+IPv6 流量的默认网关。
+注意
+需要选项：ip6
+ip=<IPv4Format/CIDR> (默认 = dhcp)
+CIDR 格式的 IPv4 地址。
+ip6=<IPv6Format/CIDR> (默认 = dhcp)
+CIDR 格式的 IPv6 地址。
+ivshmem：size=<integer> [,name=<string>]
+虚拟机间共享内存。对于虚拟机之间或虚拟机与主机之间的直接通信非常有用。
+name=<string>
+文件的名称。将使用 pve-shm- 作为前缀。默认为 VMID。在虚拟机停止时将被删除。
+size=<integer> (1 - N)
+文件大小（以 MB 为单位）。
+keephugepages：<boolean>（默认值 = 0）
+与 hugepages 一起使用。如果启用，hugepages 将在虚拟机关闭后不会被删除，并可在后续启动中使用。
+keyboard：<da | de | de-ch | en-gb | en-us | es | fi | fr | fr-be |
+fr-ca | fr-ch | hu | is | it | ja | lt | mk | nl | no | pl | pt |
+pt-br | sl | sv | tr>
+VNC 服务器的键盘布局。这个选项通常不是必需的，通常最好在客户操作系统内处理。
+kvm：<boolean>（默认值 = 1）
+启用/禁用 KVM 硬件虚拟化。
+localtime：<boolean>
+将实时时钟（RTC）设置为本地时间。如果 ostype 指示 Microsoft Windows 操作系统，则默认启用此选项。
+lock：<backup | clone | create | migrate | rollback | snapshot |
+snapshot-delete | suspended | suspending>
+锁定/解锁虚拟机。
+machine：
+(pc|pc(-i440fx)?-\d+(.\d+)+(+pve\d+)?(.pxe)?|q35|pc-q35-\d+(.\d+)+(+pve\指定 QEMU 机器类型。
+memory：<integer>（16 - N）（默认值 = 512）
+以 MiB 为单位的虚拟机 RAM。当使用气球设备时，这是最大可用内存。
+migrate_downtime：<number>（0 - N）（默认值 = 0.1）
+设置迁移过程中允许的最大停机时间（以秒为单位）。
+migrate_speed：<integer>（0 - N）（默认值 = 0）
+设置迁移的最大速度（以 MB/s 为单位）。值 0 表示无限制。
+name：<string>
+为虚拟机设置一个名称。仅在配置 Web 界面上使用。
+nameserver：<string>
+cloud-init：为容器设置 DNS 服务器 IP 地址。如果未设置 searchdomain 或 nameserver，创建操作将自动使用主机的设置。
+net[n]：[model=]<enum> [,bridge=<bridge>] [,firewall=<1|0>]
+[,link_down=<1|0>] [,macaddr=XX:XX:XX:XX:XX:XX] [,mtu=<integer>]
+[,queues=<integer>] [,rate=<number>] [,tag=<integer>]
+[,trunks=<vlanid[;vlanid...]>] [,<model>=<macaddr>]
+指定网络设备。
+bridge=<bridge>
+要将网络设备连接到的网桥。Proxmox VE 标准网桥称为 vmbr0。
+如果您不指定网桥，我们将创建一个 kvm 用户（NATed）网络设备，提供
+DHCP 和 DNS 服务。使用以下地址：
+10.0.2.2 网关
+10.0.2.3 DNS 服务器
+10.0.2.4 SMB 服务器
+DHCP 服务器从 10.0.2.15 开始为客户机分配地址。
+firewall=<boolean>
+此接口是否应受防火墙保护。
+link_down=<boolean>
+此接口是否应断开连接（如拔掉插头）。
+macaddr=XX:XX:XX:XX:XX:XX
+具有未设置的 I/G（个人/组）位的通用 MAC 地址。
+model=<e1000 | e1000-82540em | e1000-82544gc | e1000-82545em |
+e1000e | i82551 | i82557b | i82559er | ne2k_isa | ne2k_pci |
+pcnet | rtl8139 | virtio | vmxnet3>
+网络卡型号。virtio 型号在非常低的 CPU 开销下提供最佳性能。
+如果您的客户机不支持此驱动程序，通常最好使用 e1000。
+mtu=<integer>（1 - 65520）
+仅对 VirtIO 强制 MTU。设置为 1 以使用网桥 MTU
+queues=<integer>（0 - 64）
+在设备上使用的数据包队列数量。
+rate=<number>（0 - N）
+浮点数表示的速率限制（以每秒兆字节为单位）。
+tag=<integer>（1 - 4094）
+在此接口上应用于数据包的 VLAN 标签。
+trunks=<vlanid[;vlanid...]>
+通过此接口传递的 VLAN 中继。
+numa：<boolean>（默认值 = 0）
+启用/禁用 NUMA。
+numa[n]：cpus=<id[-id];...> [,hostnodes=<id[-id];...>]
+[,memory=<number>] [,policy=<preferred|bind|interleave>]
+NUMA 顶点。
+cpus=<id[-id];...>
+访问此 NUMA 节点的 CPU。
+hostnodes=<id[-id];...>
+要使用的主机 NUMA 节点。
+memory=<number>
+此 NUMA 节点提供的内存量。
+policy=<bind | interleave | preferred>
+NUMA 分配策略。
+onboot：<boolean>（默认值 = 0）
+指定在系统启动时是否启动 VM。
+ostype：<l24 | l26 | other | solaris | w2k | w2k3 | w2k8 | win10 |
+win11 | win7 | win8 | wvista | wxp>
+指定客户操作系统。这用于为特定操作启用特殊优化/功能
+系统：
+other 未指定的操作系统
+wxp 微软 Windows XP
+w2k 微软 Windows 2000
+w2k3 微软 Windows 2003
+w2k8 微软 Windows 2008
+wvista 微软 Windows Vista
+win7 微软 Windows 7
+win8 微软 Windows 8/2012/2012r2
+win10 微软 Windows 10/2016/2019
+win11 微软 Windows 11/2022
+l24 Linux 2.4 内核
+l26 Linux 2.6 - 6.X 内核
+solaris Solaris/OpenSolaris/OpenIndiania内核
+parallel[n]：/dev/parport\d+|/dev/usb/lp\d+
+映射主机并行设备（n 为 0 到 2）。
+注意
+此选项允许直接访问主机硬件。因此，无法再迁移这样的机器 - 请特别小心使用。
+警告
+实验性！用户报告了此选项的问题。
+protection：<boolean>（默认值 = 0）
+设置 VM 的保护标志。这将禁用删除 VM 和删除磁盘操作。
+reboot：<boolean>（默认值 = 1）
+允许重新启动。如果设置为0，则 VM 在重新启动时退出。
+rng0：[source=]</dev/urandom|/dev/random|/dev/hwrng>
+[,max_bytes=<integer>] [,period=<integer>]
+配置基于 VirtIO 的随机数生成器。
+max_bytes=<integer>（默认值 = 1024）
+每隔 period 毫秒允许注入到客户端的最大熵字节数。当使用 /dev/random 作为源时，选择较低的值。使用 0 禁用限制（可能危险！）。
+period=<integer>（默认值 = 1000）
+每隔 period 毫秒，熵注入配额重置，允许客户端检索另一个最大熵字节。
+source=</dev/hwrng | /dev/random | /dev/urandom>
+主机上收集熵的文件。在大多数情况下，/dev/urandom 应优先于 /dev/random 以避免主机上的熵饥饿问题。使用 urandom 
+不会以任何有意义的方式降低安全性，因为它仍然由真正的熵提供种子，并且所提供的字节很可能也会与客户端的真正熵混合。
+/dev/hwrng 可用于从主机传递硬件 RNG。
+sata[n]: [file=]<volume> [,aio=<native|threads|io_uring>]
+[,backup=<1|0>] [,bps=<bps>] [,bps_max_length=<seconds>]
+[,bps_rd=<bps>] [,bps_rd_max_length=<seconds>] [,bps_wr=<bps>]
+[,bps_wr_max_length=<seconds>] [,cache=<enum>] [,cyls=<integer>]
+[,detect_zeroes=<1|0>] [,discard=<ignore|on>] [,format=<enum>]
+[,heads=<integer>] [,iops=<iops>] [,iops_max=<iops>]
+[,iops_max_length=<seconds>] [,iops_rd=<iops>]
+[,iops_rd_max=<iops>] [,iops_rd_max_length=<seconds>]
+[,iops_wr=<iops>] [,iops_wr_max=<iops>]
+[,iops_wr_max_length=<seconds>] [,mbps=<mbps>] [,mbps_max=<mbps>]
+[,mbps_rd=<mbps>] [,mbps_rd_max=<mbps>] [,mbps_wr=<mbps>]
+[,mbps_wr_max=<mbps>] [,media=<cdrom|disk>] [,replicate=<1|0>]
+[,rerror=<ignore|report|stop>] [,secs=<integer>] [,serial=<serial>]
+[,shared=<1|0>] [,size=<DiskSize>] [,snapshot=<1|0>] [,ssd=<1|0>]
+[,trans=<none|lba|auto>] [,werror=<enum>] [,wwn=<wwn>]
+将卷用作 SATA 硬盘或 CD-ROM（n 为 0 到 5）。
+aio=<io_uring | native | threads>
+要使用的 AIO 类型。
+backup=<boolean>
+制作备份时是否应包含该驱动器。
+bps=<bps>
+以字节/秒为单位的最大读/写速度。
+bps_max_length=<seconds>
+I/O 爆发的最大长度（以秒为单位）。
+bps_rd=<bps>
+以字节/秒为单位的最大读取速度。
+bps_rd_max_length=<seconds>
+读取 I/O 爆发的最大长度（以秒为单位）。
+bps_wr=<bps>
+以字节/秒为单位的最大写入速度。
+bps_wr_max_length=<seconds>
+写入 I/O 爆发的最大长度（以秒为单位）。
+cache=<directsync | none | unsafe | writeback | writethrough>
+驱动器的缓存模式。
+cyls=<integer>
+强制驱动器的物理几何形状具有特定的柱面计数。
+detect_zeroes=<boolean>
+控制是否检测并尝试优化零的写入。
+discard=<ignore | on>
+控制是否将丢弃/修剪请求传递到底层存储。
+file=<volume>
+驱动器的支持卷。
+format=<cloop | cow | qcow | qcow2 | qed | raw | vmdk>
+驱动器支持文件的数据格式。
+heads=<integer>
+强制驱动器的物理几何形状具有特定的磁头数量。
+iops=<iops>
+每秒最大读/写 I/O 操作数。
+iops_max=<iops>
+每秒最大未限制的读/写 I/O 池操作数。
+iops_max_length=<seconds>
+I/O 爆发的最大长度（以秒为单位）。
+iops_rd=<iops>
+每秒最大读取 I/O 操作数。
+iops_rd_max=<iops>
+每秒最大未限制的读取 I/O 池操作数。
+iops_rd_max_length=<seconds>
+读取 I/O 爆发的最大长度（以秒为单位）。
+iops_wr=<iops>
+每秒最大写入 I/O 操作数。
+iops_wr_max=<iops>
+每秒最大未限制的写入 I/O 池操作数。
+iops_wr_max_length=<seconds>
+写入 I/O 爆发的最大长度（以秒为单位）。
+mbps=<mbps>
+以兆字节/秒为单位的最大读/写速度。
+mbps_max=<mbps>
+以兆字节/秒为单位的最大未限制的读/写池。
+mbps_rd=<mbps>
+以兆字节/秒为单位的最大读取速度。
+mbps_rd_max=<mbps>
+以兆字节/秒为单位的最大未限制的读取池。
+mbps_wr=<mbps>
+以兆字节/秒为单位的最大写入速度。
+mbps_wr_max=<mbps>
+每秒兆字节的最大未限制写入池。
+media=<cdrom | disk> (default = disk)
+驱动器的介质类型。
+replicate=<boolean> (default = 1)
+驱动器是否应考虑用于复制作业。
+rerror=<ignore | report | stop>
+读取错误操作。
+secs=<integer>
+强制驱动器的物理几何形状具有特定的扇区数量。
+serial=<serial>
+驱动器报告的序列号，url-encoded，最长20字节。
+shared=<boolean> (default = 0)
+将此本地管理的卷标记为所有节点上可用。
+警告
+此选项不会自动共享卷，而是假定卷已经共享！
+size=<DiskSize>
+磁盘大小。这纯粹是信息性的，没有任何影响。
+snapshot=<boolean>
+控制 qemu 的快照模式功能。如果激活，对磁盘所做的更改是临时的，并且在虚拟机关闭时将被丢弃。
+ssd=<boolean>
+是否将此驱动器暴露为固态硬盘，而不是旋转硬盘。
+trans=<auto | lba | none>
+强制磁盘几何 BIOS 转换模式。
+werror=<enospc | ignore | report | stop>
+写入错误操作。
+wwn=<wwn>
+驱动器的全球名称，编码为16字节十六进制字符串，前缀为0x。
+scsi[n]: [file=]<volume> [,aio=<native|threads|io_uring>]
+[,backup=<1|0>] [,bps=<bps>] [,bps_max_length=<seconds>]
+[,bps_rd=<bps>] [,bps_rd_max_length=<seconds>] [,bps_wr=<bps>]
+[,bps_wr_max_length=<seconds>] [,cache=<enum>] [,cyls=<integer>]
+[,detect_zeroes=<1|0>] [,discard=<ignore|on>] [,format=<enum>]
+[,heads=<integer>] [,iops=<iops>] [,iops_max=<iops>]
+[,iops_max_length=<seconds>] [,iops_rd=<iops>]
+[,iops_rd_max=<iops>] [,iops_rd_max_length=<seconds>]
+[,iops_wr=<iops>] [,iops_wr_max=<iops>]
+[,iops_wr_max_length=<seconds>] [,iothread=<1|0>] [,mbps=<mbps>]
+[,mbps_max=<mbps>] [,mbps_rd=<mbps>] [,mbps_rd_max=<mbps>]
+[,mbps_wr=<mbps>] [,mbps_wr_max=<mbps>] [,media=<cdrom|disk>]
+[,queues=<integer>] [,replicate=<1|0>]
+[,rerror=<ignore|report|stop>] [,ro=<1|0>] [,scsiblock=<1|0>]
+[,secs=<integer>] [,serial=<serial>] [,shared=<1|0>]
+[,size=<DiskSize>] [,snapshot=<1|0>] [,ssd=<1|0>]
+[,trans=<none|lba|auto>] [,werror=<enum>] [,wwn=<wwn>]
+将卷用作 SCSI 硬盘或 CD-ROM（n为 0 到 30）。
+aio=<io_uring | native | threads>
+要使用的 AIO 类型。
+backup=<boolean>
+制作备份时是否应包含驱动器。
+bps=<bps>
+每秒字节的最大读/写速度。
+bps_max_length=<seconds>
+以秒为单位的 I/O 突发的最大长度。
+bps_rd=<bps>
+每秒字节的最大读取速度。
+bps_rd_max_length=<seconds>
+以秒为单位的读取 I/O 突发的最大长度。
+bps_wr=<bps>
+每秒字节的最大写入速度。
+bps_wr_max_length=<seconds>
+以秒为单位的写入 I/O 突发的最大长度。
+cache=<directsync | none | unsafe | writeback | writethrough>
+驱动器的缓存模式
+cyls=<integer>
+强制驱动器的物理几何形状具有特定的柱面计数。
+detect_zeroes=<boolean>
+控制是否检测并尝试优化零写入。
+discard=<ignore | on>
+控制是否将丢弃/修剪请求传递给底层存储。
+file=<volume>
+驱动器的支持卷。
+format=<cloop | cow | qcow | qcow2 | qed | raw | vmdk>
+驱动器支持文件的数据格式。
+heads=<integer>
+强制驱动器的物理几何形状具有特定的磁头数量。
+iops=<iops>
+每秒最大读/写 I/O 操作数。
+iops_max=<iops>
+每秒最大未限制的读/写 I/O 操作池。
+iops_max_length=<seconds>
+以秒为单位的 I/O 突发的最大长度。
+iops_rd=<iops>
+每秒最大读取 I/O 操作数。
+iops_rd_max=<iops>
+每秒最大未限制的读取 I/O 操作池。
+iops_rd_max_length=<seconds>
+以秒为单位的读取 I/O 突发的最大长度。
+iops_wr=<iops>
+每秒最大写入 I/O 操作数。
+iops_wr_max=<iops>
+每秒最大未限制的写入 I/O 操作池。
+iops_wr_max_length=<seconds>
+以秒为单位的写入 I/O 突发的最大长度。
+iothread=<boolean>
+是否为此驱动器使用 iothreads
+mbps=<mbps>
+每秒最大读/写速度，以兆字节为单位。
+mbps_max=<mbps>
+以兆字节每秒为单位的最大未限制读/写速度池。
+mbps_rd=<mbps>
+以兆字节每秒为单位的最大读取速度。
+mbps_rd_max=<mbps>
+以兆字节每秒为单位的最大未限制读取速度池。
+mbps_wr=<mbps>
+每秒最大写入速度，以兆字节为单位。
+mbps_wr_max=<mbps>
+每秒最大未限制写入速度池，以兆字节为单位。
+media=<cdrom | disk> (default = disk)
+驱动器的媒体类型。
+queues=<integer> (2 - N)
+队列数量。
+replicate=<boolean> (default = 1)
+驱动器是否应考虑用于复制作业。
+rerror=<ignore | report | stop>
+读取错误操作。
+ro=<boolean>
+驱动器是否为只读。
+scsiblock=<boolean> (default = 0)
+是否使用 scsi-block 完全透传主机块设备
+警告
+与低内存或主机上的高内存碎片化结合可能导致 I/O 错误
+secs=<integer>
+强制驱动器的物理几何形状具有特定的扇区数量。
+serial=<serial>
+驱动器报告的序列号，URL 编码，最长 20 个字节。
+shared=<boolean> (default = 0)
+将此本地管理卷标记为在所有节点上可用。
+警告
+此选项不会自动共享卷，而是假设卷已经共享！
+size=<DiskSize>
+磁盘大小。这纯粹是信息性的，没有任何效果。
+snapshot=<boolean>
+控制 qemu 的快照模式功能。如果激活，对磁盘所做的更改将是临时的，并在虚拟机关闭时丢弃。
+ssd=<boolean>
+是否将此驱动器暴露为 SSD，而不是旋转硬盘。
+trans=<auto | lba | none>
+强制磁盘几何 BIOS 翻译模式。
+werror=<enospc | ignore | report | stop>
+写入错误操作。
+wwn=<wwn>
+驱动器的全球名称，编码为 16 字节十六进制字符串，前缀为 0x。
+scsihw: <lsi | lsi53c810 | megasas | pvscsi | virtio-scsi-pci |
+virtio-scsi-single> (default = lsi)
+SCSI 控制器型号
+searchdomain: <string>
+cloud-init：为容器设置 DNS 搜索域。如果没有设置 searchdomain 或 nameserver，创建将自动使用主机的设置。
+serial[n]: (/dev/.+|socket)
+在虚拟机内创建一个串行设备（n 为 0 到 3），并通过主机串行设备（即 /dev/ttyS0）或在主机侧创建一个 Unix 套接字（使用 qm 终端打开一个终端连接）。
+注意
+如果您通过主机串行设备，将无法再迁移这样的机器 - 请谨慎使用。
+警告
+实验性！用户报告了此选项的问题。
+shares: <integer> (0 - 50000) (default = 1000)
+自动调整内存的内存份额。数字越大，此虚拟机获得的内存越多。数字与所有其他正在运行的虚拟机的权重相关。使用零禁用自动调整内存。由 pvestatd 完成自动调整内存。
+smbios1: [base64=<1|0>] [,family=<Base64 编码字符串>]
+[,manufacturer=<Base64 编码字符串>] [,product=<Base64 编码
+字符串>] [,serial=<Base64 编码字符串>] [,sku=<Base64 编码
+字符串>] [,uuid=<UUID>] [,version=<Base64 编码字符串>]
+指定 SMBIOS 类型 1 字段。
+base64=<boolean>
+标志，表示 SMBIOS 值是 base64 编码的
+family=<Base64 编码字符串>
+设置 SMBIOS1 系列字符串。
+manufacturer=<Base64 编码字符串>
+设置 SMBIOS1 制造商。
+product=<Base64 编码字符串>
+设置 SMBIOS1 产品 ID。
+serial=<Base64 编码字符串>
+设置 SMBIOS1 序列号。
+sku=<Base64 编码字符串>
+设置 SMBIOS1 SKU 字符串。
+uuid=<UUID>
+设置 SMBIOS1 UUID。
+version=<Base64 编码字符串>
+设置 SMBIOS1 版本。
+smp: <integer> (1 - N) (default = 1)
+CPU 数量。请改用 -sockets 选项。
+sockets: <integer> (1 - N) (default = 1)
+CPU 插槽数量。
+spice_enhancements: [foldersharing=<1|0>]
+[,videostreaming=<off|all|filter>]
+为 SPICE 配置额外增强功能。
+foldersharing=<boolean> (default = 0)
+通过 SPICE 启用文件夹共享。VM 中需要安装 Spice-WebDAV 守护程序。
+videostreaming=<all | filter | off> (default = off)
+启用视频流。对检测到的视频流使用压缩。
+sshkeys: <string>
+cloud-init：设置公共 SSH 密钥（每行一个密钥，OpenSSH 格式）。
+startdate: (now | YYYY-MM-DD | YYYY-MM-DDTHH:MM:SS) (default = now)
+设置实时时钟的初始日期。有效的日期格式为：'now' 或 2006-06-17T16:01:21 或 2006-06-17。
+startup: [[order=]\d+] [,up=\d+] [,down=\d+] 启动和关闭行为。顺序是一个非负数，定义了一般的启动顺序。关闭按相反的顺序进行。
+另外，您可以设置 up 或 down 延迟（以秒为单位），这会在启动或停止下一个虚拟机之前等待指定的延迟。
+tablet: <boolean> (default = 1)
+启用/禁用 USB 平板设备。通常需要此设备才能在 VNC 上允许绝对鼠标定位。否则，鼠标与普通 VNC 
+客户端脱节。如果您在一台主机上运行很多仅控制台的客户机，您可以考虑禁用此功能以节省一些上下文切换。
+如果您使用 spice（qm set <vmid> --vga qxl），默认情况下此功能将关闭。
+tags: <string>
+虚拟机的标签。这只是元信息。
+tdf: <boolean> (default = 0)
+启用/禁用时间漂移修复。
+template: <boolean> (default = 0)
+启用/禁用模板。
+tpmstate0: [file=]<volume> [,size=<DiskSize>] [,version=<v1.2|v2.0>]
+配置用于存储 TPM 状态的磁盘。格式固定为 raw。
+file=<volume>
+驱动器的后备卷。
+size=<DiskSize>
+磁盘大小。这纯粹是信息性的，没有影响。
+version=<v1.2 | v2.0> (default = v2.0)
+TPM 接口版本。v2.0 较新，应优先选择。请注意，此选项稍后无法更改。
+unused[n]: [file=]<volume>
+引用未使用的卷。这是内部使用的，不应手动修改。
+file=<volume>
+驱动器的后备卷。
+usb[n]: [host=]<HOSTUSBDEVICE|spice> [,usb3=<1|0>]
+配置 USB 设备（n 为 0 到 4，对于机器版本 >= 7.1 且 ostype 为 l26 或 windows > 7，n 可以达到 14）。
+host=<HOSTUSBDEVICE|spice>
+主机 USB 设备或端口或值 spice。HOSTUSBDEVICE 语法是：
+'bus-port(.port)*'（十进制数）或
+'vendor_id:product_id'（十六进制数）或
+'spice'
+您可以使用 lsusb -t 命令列出现有的 USB 设备。
+注意
+此选项允许直接访问主机硬件。因此，不再可能迁移这样的机器 - 请特别小心使用。
+值 spice 可用于为 spice 添加 USB 重定向设备。
+usb3=<boolean> (default = 0)
+指定给定主机选项是否为 USB3 设备或端口。对于现代客户端（机器版本 >= 7.1，ostype 为 l26，以及 Windows 版本大于 7），
+此标志无关紧要（所有设备都插入到 xhci 控制器中）。
+vcpus: <integer> (1 - N) (default = 0)
+热插拔 vCPU 的数量。
+vga: [[type=]<enum>] [,memory=<integer>]
+配置 VGA 硬件。如果要使用高分辨率模式（>= 1280x1024x16），您可能需要增加 vga 内存选项。自 QEMU 2.9 起，
+除某些 Windows 版本（XP 及更早版本）使用 cirrus 外，所有操作系统类型的默认 VGA 显示类型均为 std。qxl 选项启用 SPICE 显示服务器。对于 win* 
+操作系统，您可以选择要使用的独立显示器数量，Linux 客户机可以自行添加显示器。您还可以在没有任何显卡的情况下运行，使用串行设备作为终端。
+memory=<integer> (4 - 512)
+设置 VGA 内存（以 MiB 为单位）。对串行显示无效。
+type=<cirrus | none | qxl | qxl2 | qxl3 | qxl4 | serial0 |
+serial1 | serial2 | serial3 | std | virtio | virtio-gl |
+vmware> (default = std)
+选择 VGA 类型。
+virtio[n]: [file=]<volume> [,aio=<native|threads|io_uring>]
+[,backup=<1|0>] [,bps=<bps>] [,bps_max_length=<seconds>]
+[,bps_rd=<bps>] [,bps_rd_max_length=<seconds>] [,bps_wr=<bps>]
+[,bps_wr_max_length=<seconds>] [,cache=<enum>] [,cyls=<integer>]
+[,detect_zeroes=<1|0>] [,discard=<ignore|on>] [,format=<enum>]
+[,heads=<integer>] [,iops=<iops>] [,iops_max=<iops>]
+[,iops_max_length=<seconds>] [,iops_rd=<iops>]
+[,iops_rd_max=<iops>] [,iops_rd_max_length=<seconds>]
+[,iops_wr=<iops>] [,iops_wr_max=<iops>]
+[,iops_wr_max_length=<seconds>] [,iothread=<1|0>] [,mbps=<mbps>]
+[,mbps_max=<mbps>] [,mbps_rd=<mbps>] [,mbps_rd_max=<mbps>]
+[,mbps_wr=<mbps>] [,mbps_wr_max=<mbps>] [,media=<cdrom|disk>]
+[,replicate=<1|0>] [,rerror=<ignore|report|stop>] [,ro=<1|0>]
+[,secs=<integer>] [,serial=<serial>] [,shared=<1|0>]
+[,size=<DiskSize>] [,snapshot=<1|0>] [,trans=<none|lba|auto>]
+[,werror=<enum>]
+将卷用作 VIRTIO 硬盘（n 为 0 到 15）。
+Proxmox VE 管理指南 243 / 534
+aio=<io_uring | native | threads>
+要使用的 AIO 类型。
+backup=<boolean>
+在进行备份时是否应包含该驱动器。
+bps=<bps>
+以每秒字节数为单位的最大读/写速度。
+bps_max_length=<seconds>
+以秒为单位的 I/O 爆发的最大长度。
+bps_rd=<bps>
+以每秒字节数为单位的最大读取速度。
+bps_rd_max_length=<seconds>
+以秒为单位的读取 I/O 爆发的最大长度。
+bps_wr=<bps>
+以每秒字节数为单位的最大写入速度。
+bps_wr_max_length=<seconds>
+以秒为单位的写入 I/O 爆发的最大长度。
+cache=<directsync | none | unsafe | writeback | writethrough>
+驱动器的缓存模式
+cyls=<integer>
+强制驱动器的物理几何结构具有特定的柱面计数。
+detect_zeroes=<boolean>
+控制是否检测并尝试优化零写入。
+discard=<ignore | on>
+控制是否将丢弃/修剪请求传递给底层存储。
+file=<volume>
+驱动器的支持卷。
+format=<cloop | cow | qcow | qcow2 | qed | raw | vmdk>
+驱动器支持文件的数据格式。
+heads=<integer>
+强制驱动器的物理几何结构具有特定的磁头计数。
+iops=<iops>
+每秒最大读/写 I/O 操作数。
+iops_max=<iops>
+以每秒操作数为单位的最大无节制读/写 I/O 池。
+iops_max_length=<seconds>
+以秒为单位的 I/O 爆发的最大长度。
+iops_rd=<iops>
+每秒最大读取 I/O 操作数。
+iops_rd_max=<iops>
+每秒最大无节制读取 I/O 池操作数。
+iops_rd_max_length=<seconds>
+以秒为单位的读取 I/O 爆发的最大长度。
+iops_wr=<iops>
+每秒最大写入 I/O 操作数。
+iops_wr_max=<iops>
+每秒最大无节制写入 I/O 池操作数。
+iops_wr_max_length=<seconds>
+以秒为单位的写入 I/O 爆发的最大长度。
+iothread=<boolean>
+是否为此驱动器使用 iothreads
+mbps=<mbps>
+以兆字节每秒为单位的最大读/写速度。
+mbps_max=<mbps>
+以兆字节每秒为单位的最大无节制读/写池。
+mbps_rd=<mbps>
+以兆字节每秒为单位的最大读取速度。
+mbps_rd_max=<mbps>
+以兆字节每秒为单位的最大无节制读取池。
+mbps_wr=<mbps>
+以兆字节每秒为单位的最大写入速度。
+mbps_wr_max=<mbps>
+以兆字节每秒为单位的最大无节制写入池。
+media=<cdrom | disk> (default = disk)
+驱动器的媒体类型。
+replicate=<boolean> (default = 1)
+驱动器是否应被视为复制任务。
+rerror=<ignore | report | stop>
+读取错误操作。
+ro=<boolean>
+驱动器是否为只读。
+secs=<integer>
+强制驱动器的物理几何结构具有特定的扇区计数。
+serial=<serial>
+驱动器报告的序列号，url 编码，最长 20 个字节。
+shared=<boolean> (default = 0)
+将此本地管理的卷标记为在所有节点上可用。
+警告
+此选项不会自动共享卷，而是假定它已经共享！
+size=<DiskSize>
+磁盘大小。这纯粹是信息性的，没有任何影响。
+snapshot=<boolean>
+控制 qemu 的快照模式特性。如果激活，对磁盘所做的更改是临时的，并且在虚拟机关闭时将被丢弃。
+trans=<auto | lba | none>
+强制磁盘几何 BIOS 转换模式。
+werror=<enospc | ignore | report | stop>
+写入错误操作。
+vmgenid: <UUID> (default = 1 (autogenerated))
+虚拟机生成 ID（vmgenid）设备向客户操作系统公开一个 128 位整数值标识符。这允许在虚拟机以不同的配置执行时（例如，快照执行或从模板创建）通知客户操作系统。
+客户操作系统注意到变化，然后可以通过将其分布式数据库的副本标记为脏，重新初始化其随机数生成器等来适当地作出反应。请注意，仅通过 API/CLI 
+创建或更新方法自动创建才有效，但手动编辑配置文件时不起作用。
+vmstatestorage: <string>
+虚拟机状态卷/文件的默认存储。
+watchdog: [[model=]<i6300esb|ib700>] [,action=<enum>]
+创建一个虚拟硬件看门狗设备。一旦启用（由客户操作触发），看门狗必须定期由客户内部的代理进行轮询，否则看门狗将重置客户（或执行指定的相应操作）
+action=<debug | none | pause | poweroff | reset | shutdown>
+在激活后客户未能及时轮询看门狗的情况下执行的操作。
+model=<i6300esb | ib700> (default = i6300esb)
+要模拟的看门狗类型。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
