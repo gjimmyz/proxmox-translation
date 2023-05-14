@@ -570,60 +570,144 @@ CPU 使用限制。
 如果计算机有 2 个 CPU，那么它总共有 2 个 CPU 时间。值 0 表示没有 CPU 限制。
 cpuunits: <integer> (0 - 500000) (默认 = cgroup v1: 1024, cgroup v2: 100)
 容器的 CPU 权重。参数用于内核公平调度程序。数字越大，容器获得的 CPU 时间越多。数字与所有其他正在运行的客户机的权重相对。
+debug: <boolean> (默认 = 0)
+尝试更详细地显示。目前，这只在启动时启用调试日志级别。
+description: <string>
+容器的描述。在网络接口 CT 的摘要中显示。这将作为配置文件中的注释保存。
+features: [force_rw_sys=<1|0>] [,fuse=<1|0>] [,keyctl=<1|0>] [,mknod=<1|0>] [,mount=<fstype;fstype;...>] [,nesting=<1|0>]
+允许容器访问高级功能。
+force_rw_sys=<boolean> (默认 = 0)
+将非特权容器中的 /sys 以 rw 而不是混合模式挂载。这可能会破坏新版本（>= v245）的 systemd-network 使用的网络。
+fuse=<boolean> (默认 = 0)
+允许在容器中使用 fuse 文件系统。请注意，fuse 和 freezer cgroup 之间的交互可能导致 I/O 死锁。
+keyctl=<boolean> (默认 = 0)
+仅适用于非特权容器：允许使用 keyctl() 系统调用。这是在容器内使用 docker 所必需的。默认情况下，非特权容器会将此系统调用视为不存在。
+这主要是为了解决 systemd-networkd 的问题，因为当某些 keyctl() 操作由于权限不足而被内核拒绝时，它会将其视为致命错误。实际上，您可以选择运行 systemd-networkd 或 docker。
+mknod=<boolean> (默认 = 0)
+允许非特权容器使用 mknod() 添加某些设备节点。这需要具有将 seccomp 陷阱传递到用户空间支持的内核（5.3 或更新）。这是实验性的。
+mount=<fstype;fstype;...>
+允许挂载特定类型的文件系统。这应该是文件系统类型的列表，如 mount 命令所使用的。请注意，这可能对容器的安全性产生负面影响。
+通过访问循环设备，挂载文件可以绕过设备 cgroup 的 mknod 权限，挂载 NFS 文件系统可能会完全阻止主机的 I/O 并阻止其重启等。
+nesting=<boolean> (默认 = 0)
+允许嵌套。最好与具有额外 id 映射的非特权容器一起使用。请注意，这将使主机的 procfs 和 sysfs 内容暴露给客户端。
+hookscript: <string>
+在容器生命周期的各个阶段执行的脚本。
+hostname: <string>
+为容器设置主机名。
+lock: <backup | create | destroyed | disk | fstrim | migrate | mounted | rollback | snapshot | snapshot-delete>
+锁定/解锁容器。
+memory: <integer> (16 - N) (默认 = 512)
+容器的 RAM 容量（以 MB 为单位）。
+mp[n]: [volume=]<volume> ,mp=<Path> [,acl=<1|0>] [,backup=<1|0>] [,mountoptions=<opt[;opt...]>] [,quota=<1|0>] [,replicate=<1|0>] [,ro=<1|0>] 
+[,shared=<1|0>] [,size=<DiskSize>]
+将卷用作容器挂载点。使用特殊语法 STORAGE_ID:SIZE_IN_GiB 分配新卷。
+acl=<boolean>
+明确启用或禁用 ACL 支持。
+backup=<boolean>
+是否在备份中包含挂载点（仅用于卷挂载点）。
+mountoptions=<opt[;opt...]>
+rootfs/mps 的额外挂载选项。
+mp=<Path>
+从容器内部看到的挂载点路径。
+注意
+出于安全原因，不得包含任何符号链接。
+quota=<boolean>
+在容器内启用用户配额（zfs 子卷不支持）
+replicate=<boolean> (默认 = 1)
+将此卷包含在存储副本作业中。
+ro=<boolean>
+只读挂载点
+shared=<boolean> (默认 = 0)
+将此非卷挂载点标记为在所有节点上可用。
+警告
+此选项不会自动共享挂载点，它假定挂载点已经共享！
+size=<DiskSize>
+卷大小（只读值）。
+volume=<volume>
+要挂载到容器中的卷、设备或目录。
+nameserver: <string>
+为容器设置 DNS 服务器 IP 地址。如果您既未设置 searchdomain 也未设置 nameserver，则创建将自动使用主机的设置。
+net[n]: name=<string> [,bridge=<bridge>] [,firewall=<1|0>] [,gw=<GatewayIPv4>] [,gw6=<GatewayIPv6>] [,hwaddr=XX:XX:XX:XX:XX:XX] 
+[,ip=<(IPv4/CIDR|dhcp|manual)>] [,ip6=<(IPv6/CIDR|auto|dhcp|manual)>] [,link_down=<1|0>] [,mtu=<integer>] [,rate=<mbps>] [,tag=<integer>] 
+[,trunks=<vlanid[;vlanid...]>] [,type=<veth>]
+指定容器的网络接口。
+bridge=<bridge>
+将网络设备连接到的桥。
+firewall=<boolean>
+控制是否应使用此接口的防火墙规则。
+gw=<GatewayIPv4>
+IPv4 流量的默认网关。
+gw6=<GatewayIPv6>
+IPv6 流量的默认网关。
+hwaddr=XX:XX:XX:XX:XX:XX
+具有未设置 I/G (Individual/Group) 位的通用 MAC 地址。
+ip=<(IPv4/CIDR|dhcp|manual)>
+CIDR 格式的 IPv4 地址。
+ip6=<(IPv6/CIDR|auto|dhcp|manual)>
+CIDR 格式的 IPv6 地址。
+link_down=<boolean>
+此接口是否应断开连接（如拔下插头）。
+mtu=<integer> (64 - 65535)
+接口的最大传输单位（lxc.network.mtu）。
+name=<string>
+从容器内部看到的网络设备的名称（lxc.network.name）。
+rate=<mbps>
+对接口应用速率限制。
+tag=<integer> (1 - 4094)
+此接口的 VLAN 标签。
+trunks=<vlanid[;vlanid...]>
+通过接口传递的 VLAN id。
+type=<veth>
+网络接口类型。
+onboot: <boolean> (default = 0)
+指定在系统启动时是否启动容器。
+ostype: <alpine | archlinux | centos | debian | devuan | fedora | gentoo | nixos | opensuse | ubuntu | unmanaged>
+操作系统类型。这用于在容器内设置配置，并对应于 /usr/share/lxc/config/<ostype>.common.conf 中的 lxc 设置脚本。可以使用 unmanaged 值跳过特定操作系统的设置。
+protection: <boolean> (default = 0)
+设置容器的保护标志。这将防止 CT 或 CT 的磁盘移除/更新操作。
+rootfs: [volume=]<volume> [,acl=<1|0>] [,mountoptions=<opt[;opt...]>] [,quota=<1|0>] [,replicate=<1|0>] [,ro=<1|0>] [,shared=<1|0>] [,size=<DiskSize>]
+将卷用作容器根。
+acl=<boolean>
+显式启用或禁用 ACL 支持。
+mountoptions=<opt[;opt...]>
+rootfs/mps 的额外挂载选项。
+quota=<boolean>
+在容器内启用用户配额（不支持 zfs 子卷）。
+replicate=<boolean> (default = 1)
+将此卷包含在存储复制作业中。
+ro=<boolean>
+只读挂载点。
+shared=<boolean> (default = 0)
+将此非卷挂载点标记为在所有节点上可用。
+警告
+此选项不会自动共享挂载点，而是假设它已经共享！
+size=<DiskSize>
+卷大小（只读值）。
+volume=<volume>
+要挂载到容器中的卷、设备或目录。
+searchdomain: <string>
+为容器设置 DNS 搜索域。如果您既没有设置 searchdomain 也没有设置 nameserver，那么创建将自动使用来自主机的设置。
+startup: [[order=]\d+] [,up=\d+] [,down=\d+] 启动和关闭行为。Order 
+是一个非负数，定义了一般的启动顺序。关闭按相反顺序完成。此外，您可以设置以秒为单位的上或下延迟，该延迟指定在启动或停止下一个虚拟机之前等待的时间。
+swap: <integer> (0 - N) (default = 512)
+容器的 SWAP 大小（以 MB 为单位）。
+tags: <string>
+容器的标签。这仅是元信息。
+template: <boolean> (default = 0)
+启用/禁用模板。
+timezone: <string>
+容器中要使用的时区。如果未设置该选项，则不执行任何操作。可以将其设置为主机以匹配主机时区，或者从 /usr/share/zoneinfo/zone.tab 中选择任意时区选项。
+tty: <integer> (0 - 6) (default = 2)
+指定容器可用的 tty 数量。
+unprivileged: <boolean> (default = 0)
+使容器以非特权用户身份运行。（不应手动修改。）
+unused[n]: [volume=]<volume>
+对未使用的卷的引用。这是内部使用的，不应手动修改。
+volume=<volume>
+当前未使用的卷。
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+11.12 锁定
+容器迁移、快照和备份（vzdump）会设置锁定，以防止在受影响的容器上进行不兼容的并发操作。有时您需要手动删除此类锁定（例如，在断电后）。
+# pct unlock <CTID>
+警告
+只有在确信设置锁的操作不再运行时，才执行此操作。
