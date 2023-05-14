@@ -1,2 +1,529 @@
 proxmox7-4-12
 
+第12章
+软件定义网络
+软件定义网络（SDN）功能允许您在数据中心级别创建虚拟网络（VNet）。
+警告
+SDN 目前是 Proxmox VE 中的实验性功能。相关的文档也仍在开发中。如有问题和反馈，请在我们的邮件列表或论坛第1.10节中提问。
+
+12.1 安装
+要启用实验性的软件定义网络（SDN）集成，您需要在每个节点上安装 libpve-network 和 ifupdown2 软件包：
+apt update
+apt install libpve-network-perl ifupdown2
+注意
+Proxmox VE 7 版及以上已预装 ifupdown2。
+在此之后，您需要将以下行添加到 /etc/network/interfaces 配置文件的末尾，以便包含并激活 SDN 配置。
+source /etc/network/interfaces.d/*
+
+12.2 基本概述
+Proxmox VE SDN 允许使用灵活的、软件控制的配置，对虚拟客户机网络进行分隔和细粒度控制。
+分隔是通过区域管理的，一个区域是其自己的虚拟分隔网络区域。VNet 是连接到区域的一种类型的虚拟网络。
+根据区域使用的类型或插件，它可以具有不同的行为并提供不同的功能、优点和缺点。
+通常，VNet 表现为具有 VLAN 或 VXLAN 标签的普通 Linux 桥，但是，某些 VNet 还可以使用第 3 层路由进行控制。VNet 在从集群范围的数据中心 SDN 
+管理界面配置后，在每个节点上本地部署。
+
+12.2.1 主要配置
+配置是在数据中心（集群范围）级别完成的，并保存在共享配置文件系统中的文件中：/etc/pve/sdn
+在 Web 界面上，SDN 主要包括 3 个部分：
+• SDN：SDN 状态概览
+• 区域：创建和管理虚拟分隔的网络区域
+• VNets：创建虚拟网络桥并管理子网
+此外，还提供了以下选项：
+• 控制器：用于控制复杂设置中的第 3 层路由
+• 子网：用于在 VNet 上定义 IP 网络
+• IPAM：启用使用外部工具进行 IP 地址管理（客户端 IP）
+• DNS：定义用于注册虚拟客户机主机名和 IP 地址的 DNS 服务器 API
+
+12.2.2 SDN
+这是主状态面板。在这里，您可以查看不同节点上区域的部署状态。
+应用按钮用于推送并重新加载集群节点上的本地配置。
+
+12.2.3 本地部署监控
+通过主 SDN 面板应用配置后，本地网络配置将在每个节点上的文件 /etc/network/interfaces.d/sdn 中本地生成，并使用 ifupdown2 重新加载。
+您可以通过主树监控本地区域和 VNet 的状态。
+
+12.3 区域
+区域定义了一个虚拟分隔的网络。区域可以限制在特定节点上，并分配权限，以便将用户限制在某个区域及其包含的 VNet 中。
+可以使用不同的技术进行分隔：
+• VLAN：虚拟 LAN 是细分 LAN 的经典方法
+• QinQ：堆叠 VLAN（正式称为 IEEE 802.1ad）
+• VXLAN：第 2 层 VXLAN
+• 简单：隔离桥。简单的第 3 层路由桥（NAT）
+• EVPN（BGP EVPN）：使用第 3 层边界网关协议（BGP）路由的 VXLAN
+
+12.3.1 通用选项
+以下选项适用于所有区域类型：
+nodes
+区域和关联 VNet 应部署在哪些节点上
+ipam
+可选。使用 IP 地址管理（IPAM）工具管理区域中的 IP。
+dns
+可选。DNS API 服务器。
+reversedns
+可选。反向 DNS API 服务器。
+dnszone
+可选。DNS 域名。用于注册主机名，如 <hostname>.<domain>。DNS 区域必须已经在 DNS 服务器上存在。
+
+12.3.2 简单区域
+这是最简单的插件。它将创建一个隔离的 VNet 桥。这个桥不连接到物理接口，虚拟机流量仅在节点之间是本地的。它还可以用于 NAT 或路由设置。
+
+12.3.3 VLAN 区域
+此插件重用现有的本地 Linux 或 OVS 桥，并在其上管理 VLAN。
+使用 SDN 模块的好处是，您可以使用特定的 VNet VLAN 标签创建不同的区域，并将虚拟机限制在分隔的区域中。
+特定 VLAN 配置选项：
+bridge
+重用此本地桥或 OVS 交换机，已在每个本地节点上配置。
+
+12.3.4 QinQ 区域
+QinQ 也称为 VLAN 堆叠，其中第一个 VLAN 标签为区域（服务 VLAN）定义，第二个 VLAN 标签为 VNet 定义。
+注意
+您的物理网络交换机必须支持堆叠 VLAN 才能进行此配置！
+以下是特定于 QinQ 的配置选项：
+bridge
+已在每个本地节点上配置的本地 VLAN-aware 桥
+service vlan
+此区域的主 VLAN 标签
+service vlan protocol
+允许您在 802.1q（默认）或 802.1ad 服务 VLAN 类型之间进行选择。
+mtu
+由于标签的双重堆叠，您需要为 QinQ VLAN 提供 4 个额外字节。例如，如果您的物理接口 MTU 为 1500，您必须将 MTU 减少到 1496。
+
+12.3.5 VXLAN 区域
+VXLAN 插件在现有网络（底层）之上建立一个隧道（覆盖）。这将层 2 以太网帧封装在使用 4789 作为默认目标端口的层 4 UDP 
+数据报中。例如，您可以在公共互联网网络节点之上创建一个私有 IPv4 VXLAN 网络。
+这只是一个层 2 隧道，因此不可能在不同的 VNet 之间进行路由。
+每个 VNet 将在范围 1 - 16777215 内具有特定的 VXLAN ID。
+特定 EVPN 配置选项：
+peers address list
+您希望进行通信的每个节点的 IP 地址列表。也可以是外部节点。
+mtu
+由于 VXLAN 封装使用 50 字节，所以 MTU 需要比出站物理接口低 50 字节。
+
+12.3.6 EVPN 区域
+这是所有受支持插件中最复杂的一个。
+BGP-EVPN 允许您创建可路由的层 3 网络。EVPN 的 VNet 可以具有任播 IP 地址和/或 MAC 地址。每个节点上的桥接 IP 是相同的，这意味着虚拟客户端可以使用此地址作为网关。
+通过 VRF（虚拟路由和转发）接口，路由可以在不同区域的 VNet 之间工作。
+特定于 EVPN 的配置选项如下：
+VRF VXLAN 标签
+这是用于在 VNet 之间的路由互连的 VXLAN-ID。它必须与 VNet 的 VXLANID 不同。
+controller
+首先必须定义一个 EVPN 控制器（请参阅控制器插件部分）。
+VNet MAC 地址
+此区域中所有 VNet 的唯一任播 MAC 地址。如果未定义，将自动生成。
+出口节点
+可选。这是在您希望将某些 Proxmox VE 节点定义为从 EVPN 网络通过真实网络的出口网关时使用的。配置的节点将在 EVPN 网络中宣告默认路由。
+主出口节点
+可选。如果您使用多个出口节点，这将强制流量到主出口节点，而不是在所有节点上进行负载均衡。如果您想使用 SNAT 或者您的上游路由器不支持 ECMP，则需要这样做。
+出口节点本地路由
+可选。这是一个特殊选项，如果您需要从出口节点访问 VM/CT 服务。 （默认情况下，出口节点仅允许在真实网络和 EVPN 网络之间转发流量）。
+广告子网
+可选。如果您有静默 VM/CT（例如，如果您有多个 IP，任播网关无法看到来自这些 IP 的流量，这些 IP 地址将无法在 EVPN 网络中达到）。
+在这种情况下，此选项将在 EVPN 网络中宣告完整子网。
+禁用 Arp-Nd 抑制
+可选。不要抑制 ARP 或 ND 数据包。如果您在客户端 VM 中使用浮动 IP（IP 和 MAC 地址在系统之间移动），则需要这样做。
+路由目标导入
+可选。允许您导入外部 EVPN 路由目标列表。用于跨数据中心或不同 EVPN 网络互连。
+MTU
+因为 VXLAN 封装使用了 50 字节，所以 MTU 需要比外部物理接口的最大 MTU 小 50 字节。
+
+12.4 VNets
+VNet 在其基本形式上是一个将在节点上本地部署并用于虚拟机通信的 Linux 网桥。
+VNet 配置属性包括：
+ID
+用于命名和识别 VNet 的 8 个字符 ID
+别名
+如果 ID 不够用，可选更长的名称
+区域
+与此 VNet 关联的区域
+标签
+唯一的 VLAN 或 VXLAN ID
+VLAN 感知
+启用在虚拟机或容器的 vNIC 配置中添加额外的 VLAN 标签，以允许客户操作系统管理 VLAN 的标签。
+
+12.4.1 子网
+子网络（子网）允许您定义特定的 IP 网络（IPv4 或 IPv6）。对于每个 VNet，您可以定义一个或多个子网。
+子网可用于：
+• 限制您可以在特定 VNet 上定义的 IP 地址
+• 在层 3 区域的 VNet 上分配路由/网关
+• 在层 3 区域的 VNet 上启用 SNAT
+• 通过 IPAM 插件自动分配虚拟客户机（VM 或 CT）上的 IP
+• 通过 DNS 插件进行 DNS 注册
+如果 IPAM 服务器与子网区域关联，则子网前缀将自动在 IPAM 中注册。
+子网属性包括：
+ID
+一个 CIDR 网络地址，例如 10.0.0.0/8
+网关
+网络默认网关的 IP 地址。在第 3 层区域（简单/EVPN 插件）上，它将部署在 VNet 上。
+SNAT
+可选。为此子网启用第 3 层区域（简单/EVPN 插件）的 SNAT。子网的源 IP 将被 NAT 到服务器的出站接口/IP。在 EVPN 区域中，这只在 EVPN 网关节点上完成。
+Dnszoneprefix
+可选。向域注册添加前缀，如 <hostname>.prefix.<domain>
+
+12.5 控制器
+某些区域类型需要一个外部控制器来管理 VNet 控制平面。目前只需要 bgp-evpn 区域插件。
+
+12.5.1 EVPN 控制器
+对于 BGP-EVPN，我们需要一个控制器来管理控制平面。目前支持的软件控制器是 "frr" 路由器。您可能需要在您要部署 EVPN 区域的每个节点上安装它。
+apt install frr frr-pythontools
+配置选项：
+asn
+唯一的 BGP ASN 号。强烈建议使用私有 ASN 号码（64512 - 65534、4200000000 - 4294967294），否则您可能会无意中破坏全球路由。
+peers
+您要进行 EVPN 通信的所有节点的 IP 列表（也可以是外部节点或路由反射服务器）
+
+12.5.2 BGP 控制器
+BGP 控制器不直接由区域使用。您可以使用它配置 FRR 以管理 BGP 对等体。对于 BGP-EVPN，它可以用于定义不同 ASN 的节点，从而进行 EBGP。
+配置选项：
+节点
+该 BGP 控制器的节点
+asn
+一个唯一的 BGP ASN 号码。强烈建议使用私有 ASN 号码范围（64512 - 65534）或（4200000000 - 4294967294），否则您可能会无意中破坏全球路由。
+peers
+您希望使用底层 BGP 网络与之通信的对等 IP 地址列表。
+ebgp
+如果您的对等方的 remote-AS 不同，则启用 EBGP。
+loopback
+将环回或虚拟接口用作 EVPN 网络的源（用于多路径）。
+ebgp-mutltihop
+增加到达对等方的跳数，以防它们没有直接连接或使用环回。
+bgp-multipath-as-path-relax
+如果您的对等方有不同的 ASN，则允许 ECMP。
+
+12.6 IPAM
+IPAM（IP 地址管理）工具用于管理/分配网络上客户机的 IP 地址。例如，在创建 VM/CT 时，可以用它来查找空闲 IP 地址（尚未实现）。
+IPAM 可以与一个或多个区域关联，为这些区域中定义的所有子网提供 IP 地址。
+
+12.6.1 Proxmox VE IPAM 插件
+如果您没有外部 IPAM 软件，这是您的 Proxmox VE 集群的默认内部 IPAM。
+
+12.6.2 phpIPAM 插件
+https://phpipam.net/
+您需要在 phpIPAM 中创建一个应用程序并添加具有管理员权限的 API 令牌。
+phpIPAM 配置属性包括：
+url
+REST-API 端点：http://phpipam.domain.com/api/<appname>/
+token
+API 访问令牌
+section
+一个整数 ID。在 phpIPAM 中，部分是子网的组。默认安装为客户使用 sectionid=1。
+
+12.6.3 NetBox IPAM 插件
+NetBox 是一个 IP 地址管理（IPAM）和数据中心基础设施管理（DCIM）工具。请参阅源代码库以了解详细信息：https://github.com/netbox-community/netbox
+您需要在 NetBox 中创建一个 API 令牌以使用它：https://netbox.readthedocs.io/en/stable/api/authentication
+NetBox 配置属性包括：
+url
+REST API 端点：http://yournetbox.domain.com/api
+token
+API 访问令牌
+
+12.7 DNS
+Proxmox VE SDN 中的 DNS 插件用于定义 DNS API 服务器，用于注册主机名和 IP 地址。DNS 配置与一个或多个区域关联，为区域中配置的所有子网 IP 提供 DNS 注册。
+
+12.7.1 PowerDNS 插件
+https://doc.powerdns.com/authoritative/http-api/index.html
+您需要在 PowerDNS 配置中启用 Web 服务器和 API：
+api=yes
+api-key=arandomgeneratedstring
+webserver=yes
+webserver-port=8081
+PowerDNS 配置选项包括：
+url
+REST API 端点：http://yourpowerdnserver.domain.com:8081/api/v1/servers/localhost
+key
+API 访问密钥
+ttl
+记录的默认 TTL
+
+12.8 示例
+
+12.8.1 VLAN 设置示例
+提示
+虽然我们在这里显示纯文本配置内容，但几乎所有内容都应该只使用 Web 界面进行配置。
+Node1: /etc/network/interfaces
+auto vmbr0
+iface vmbr0 inet manual
+bridge-ports eno1
+bridge-stp off
+bridge-fd 0
+bridge-vlan-aware yes
+bridge-vids 2-4094
+#management ip on vlan100
+auto vmbr0.100
+iface vmbr0.100 inet static
+address 192.168.0.1/24
+source /etc/network/interfaces.d/*
+Node2: /etc/network/interfaces
+auto vmbr0
+iface vmbr0 inet manual
+bridge-ports eno1
+bridge-stp off
+bridge-fd 0
+bridge-vlan-aware yes
+bridge-vids 2-4094
+#management ip on vlan100
+auto vmbr0.100
+iface vmbr0.100 inet static
+address 192.168.0.2/24
+source /etc/network/interfaces.d/*
+创建名为“myvlanzone”的 VLAN 区域：
+id: myvlanzone
+bridge: vmbr0
+创建名为“myvnet1”的 VNet，其 vlan-id 为 10，并使用先前创建的 myvlanzone 作为其区域。
+id: myvnet1
+zone: myvlanzone
+tag: 10
+将配置通过主 SDN 面板应用，以在每个节点上本地创建 VNet。
+在 node1 上创建一个基于 Debian 的虚拟机（vm1），其 vNIC 位于“myvnet1”上。
+对于此 VM，请使用以下网络配置：
+auto eth0
+iface eth0 inet static
+address 10.0.3.100/24
+在 node2 上创建第二个虚拟机（vm2），其 vNIC 位于与 vm1 相同的 VNet “myvnet1”上。
+对于此 VM，请使用以下网络配置：
+auto eth0
+iface eth0 inet static
+address 10.0.3.101/24
+完成此操作后，您应该能够在该网络上的两个 VM 之间进行 ping 通信。
+
+12.8.2 QinQ 设置示例
+提示
+虽然我们在这里显示纯文本配置内容，但几乎所有内容都应该只使用 Web 界面进行配置。
+Node1: /etc/network/interfaces
+auto vmbr0
+iface vmbr0 inet manual
+bridge-ports eno1
+bridge-stp off
+bridge-fd 0
+bridge-vlan-aware yes
+bridge-vids 2-4094
+#management ip on vlan100
+auto vmbr0.100
+iface vmbr0.100 inet static
+address 192.168.0.1/24
+source /etc/network/interfaces.d/*
+Node2: /etc/network/interfaces
+auto vmbr0
+iface vmbr0 inet manual
+bridge-ports eno1
+bridge-stp off
+bridge-fd 0
+bridge-vlan-aware yes
+bridge-vids 2-4094
+Proxmox VE Administration Guide 288 / 534
+#management ip on vlan100
+auto vmbr0.100
+iface vmbr0.100 inet static
+address 192.168.0.2/24
+source /etc/network/interfaces.d/*
+创建一个名为“qinqzone1”的QinQ区域，服务 VLAN 为 20
+id: qinqzone1
+bridge: vmbr0
+service vlan: 20
+创建另一个名为“qinqzone2”的QinQ区域，服务 VLAN 为 30
+id: qinqzone2
+bridge: vmbr0
+service vlan: 30
+在先前创建的“qinqzone1”区域上，创建一个名为“myvnet1”的 VNet，客户 VLAN-ID 为 100。
+id: myvnet1
+zone: qinqzone1
+tag: 100
+在先前创建的“qinqzone2”区域上，创建一个名为“myvnet2”的 VNet，客户 VLAN-ID 为 100。
+id: myvnet2
+zone: qinqzone2
+tag: 100
+在主 SDN Web 界面面板上应用配置，以在每个节点上本地创建 VNet。
+在 node1 上创建一个基于 Debian 的虚拟机（vm1），其 vNIC 位于“myvnet1”上。
+对于此 VM，请使用以下网络配置：
+auto eth0
+iface eth0 inet static
+address 10.0.3.100/24
+在 node2 上创建第二个虚拟机（vm2），其 vNIC 位于与 vm1 相同的 VNet “myvnet1”上。
+对于此 VM，请使用以下网络配置：
+auto eth0
+iface eth0 inet static
+address 10.0.3.101/24
+在 node1 上创建第三个虚拟机（vm3），其 vNIC 位于另一个 VNet “myvnet2”上。
+对于此 VM，请使用以下网络配置：
+auto eth0
+iface eth0 inet static
+address 10.0.3.102/24
+在 node2 上创建另一个虚拟机（vm4），其 vNIC 位于与 vm3 相同的 VNet “myvnet2”上。
+对于此 VM，请使用以下网络配置：
+auto eth0
+iface eth0 inet static
+address 10.0.3.103/24
+然后，您应该能够在 vm1 和 vm2 之间以及在 vm3 和 vm4 之间进行 ping 操作。
+然而，vm1 或 vm2 上的任何虚拟机都无法 ping 到 vm3 或 vm4，因为它们位于具有不同 service-vlan 的不同区域上。
+
+12.8.3 VXLAN 设置示例
+提示
+虽然我们在这里显示纯文本配置内容，但几乎所有内容都可以通过 Web 界面进行配置。
+node1: /etc/network/interfaces
+auto vmbr0
+iface vmbr0 inet static
+address 192.168.0.1/24
+gateway 192.168.0.254
+bridge-ports eno1
+bridge-stp off
+bridge-fd 0
+mtu 1500
+source /etc/network/interfaces.d/*
+node2: /etc/network/interfaces
+auto vmbr0
+iface vmbr0 inet static
+address 192.168.0.2/24
+gateway 192.168.0.254
+bridge-ports eno1
+bridge-stp off
+bridge-fd 0
+mtu 1500
+source /etc/network/interfaces.d/*
+node3: /etc/network/interfaces
+auto vmbr0
+iface vmbr0 inet static
+address 192.168.0.3/24
+gateway 192.168.0.254
+bridge-ports eno1
+bridge-stp off
+Proxmox VE Administration Guide 290 / 534
+bridge-fd 0
+mtu 1500
+source /etc/network/interfaces.d/*
+创建名为“myvxlanzone”的VXLAN区域，使用较低的MTU以确保VXLAN头部的额外50字节可以容纳。将节点上之前配置的所有IP添加到对等地址列表中。
+id: myvxlanzone
+peers address list: 192.168.0.1,192.168.0.2,192.168.0.3
+mtu: 1450
+使用先前创建的VXLAN区域“myvxlanzone”创建名为“myvnet1”的VNet。
+id: myvnet1
+zone: myvxlanzone
+tag: 100000
+在主SDN网络界面面板上应用配置，以便在每个节点上本地创建VNet。
+在node1上创建一个基于Debian的虚拟机（vm1），其vNIC位于“myvnet1”上。
+对于此VM，请使用以下网络配置（注意较低的MTU）。
+auto eth0
+iface eth0 inet static
+address 10.0.3.100/24
+mtu 1450
+在node3上创建第二个虚拟机（vm2），其vNIC位于与vm1相同的VNet“myvnet1”上。
+对于此VM，请使用以下网络配置：
+auto eth0
+iface eth0 inet static
+address 10.0.3.101/24
+mtu 1450
+然后，您应该能够在vm1和vm2之间进行ping操作。
+
+12.8.4 EVPN 设置示例
+node1: /etc/network/interfaces
+auto vmbr0
+iface vmbr0 inet static
+address 192.168.0.1/24
+gateway 192.168.0.254
+bridge-ports eno1
+bridge-stp off
+bridge-fd 0
+mtu 1500
+source /etc/network/interfaces.d/*
+node2: /etc/network/interfaces
+auto vmbr0
+iface vmbr0 inet static
+address 192.168.0.2/24
+gateway 192.168.0.254
+bridge-ports eno1
+bridge-stp off
+bridge-fd 0
+mtu 1500
+source /etc/network/interfaces.d/*
+node3: /etc/network/interfaces
+auto vmbr0
+iface vmbr0 inet static
+address 192.168.0.3/24
+gateway 192.168.0.254
+bridge-ports eno1
+bridge-stp off
+bridge-fd 0
+mtu 1500
+source /etc/network/interfaces.d/*
+使用私有ASN号码和上述节点地址作为对等方创建一个EVPN控制器。
+id: myevpnctl
+asn: 65000
+peers: 192.168.0.1,192.168.0.2,192.168.0.3
+创建一个名为“myevpnzone”的EVPN区域，使用先前创建的EVPN控制器。将node1和node2定义为出口节点。
+id: myevpnzone
+vrf vxlan tag: 10000
+controller: myevpnctl
+mtu: 1450
+vnet mac address: 32:F4:05:FE:6C:0A
+exitnodes: node1,node2
+使用EVPN区域“myevpnzone”创建名为“myvnet1”的第一个VNet。
+id: myvnet1
+zone: myevpnzone
+tag: 11000
+在myvnet1上创建一个子网10.0.1.0/24，网关为10.0.1.1。
+subnet: 10.0.1.0/24
+gateway: 10.0.1.1
+使用相同的EVPN区域“myevpnzone”创建第二个名为“myvnet2”的VNet，使用不同的IPv4 CIDR网络。
+id: myvnet2
+zone: myevpnzone
+tag: 12000
+在vnet2上创建另一个子网10.0.2.0/24，网关为10.0.2.1
+子网：10.0.2.0/24
+网关：10.0.2.1
+从主SDN网络界面面板应用配置，在每个节点上本地创建VNet并生成FRR配置。
+在node1上创建一个基于Debian的虚拟机（vm1），带有一个连接到“myvnet1”的vNIC。
+对于此虚拟机，请使用以下网络配置：
+auto eth0
+iface eth0 inet static
+address 10.0.1.100/24
+gateway 10.0.1.1 #这是vnet1的ip
+mtu 1450
+在node2上创建第二个虚拟机（vm2），带有一个连接到另一个VNet“myvnet2”的vNIC。
+对于此虚拟机，请使用以下网络配置：
+auto eth0
+iface eth0 inet static
+address 10.0.2.100/24
+gateway 10.0.2.1 #这是myvnet2的ip
+mtu 1450
+然后，您应该能够从vm1 ping vm2，从vm2 ping vm1。
+如果从非网关节点node3的vm2 ping外部IP，则数据包将转到配置的myvnet2网关，然后将路由到出口节点（node1或node2），
+从那里将通过node1或node2上配置的默认网关离开这些节点。
+注意
+您需要在外部网关上为node1和node2添加10.0.1.0/24和10.0.2.0/24网络的反向路由，以便公共网络可以回复。
+如果您已经配置了一个外部BGP路由器，BGP-EVPN路由（本例中为10.0.1.0/24和10.0.2.0/24）将动态地进行通告。
+
+12.9 备注
+
+12.9.1 多个EVPN出口节点
+如果您有多个网关节点，则应禁用rp_filter（严格反向路径过滤）选项，因为数据包可能在一个节点到达但从另一个节点离开。
+sysctl.conf禁用rp_filter
+net.ipv4.conf.default.rp_filter=0
+net.ipv4.conf.all.rp_filter=0
+
+12.9.2 VXLAN IPSEC加密
+如果需要在VXLAN上添加加密，可以通过strongswan使用IPSEC来实现。
+您需要将MTU减少60字节（IPv4）或80字节（IPv6）以处理加密。
+因此，对于默认的实际1500 MTU，您需要使用1370的MTU（1370 + 80（IPSEC）+ 50（VXLAN）== 1500）。
+安装strongswan
+apt install strongswan
+将配置添加到“/etc/ipsec.conf”。 我们只需要加密来自VXLAN UDP端口4789的流量。
+conn %default
+ike=aes256-sha1-modp1024! # 最快但合理安全的密码 -
+在现代硬件上
+esp=aes256-sha1!
+leftfirewall=yes # 当使用Proxmox VE -
+防火墙规则时必须
+conn output
+rightsubnet=%dynamic[udp/4789]
+right=%any
+type=transport
+authby=psk
+auto=route
+conn input
+leftsubnet=%dynamic[udp/4789]
+type=transport
+authby=psk
+auto=route
+然后使用以下命令生成预共享密钥：
+openssl rand -base64 128
+将密钥添加到“/etc/ipsec.secrets”中，以使文件内容如下所示：
+: PSK <generatedbase64key>
+您需要将PSK和配置复制到其他节点。
