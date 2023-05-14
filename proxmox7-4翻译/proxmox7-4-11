@@ -1,2 +1,405 @@
 proxmox7-4-11
 
+第11章
+Proxmox容器工具包
+容器是与完全虚拟化的机器（VM）相比较轻量级的替代方案。它们使用它们运行在其上的主机系统的内核，而不是模拟一个完整的操作系统（OS）。
+这意味着容器可以直接访问主机系统上的资源。
+容器的运行成本很低，通常可以忽略不计。然而，有一些需要考虑的缺点：
+• Proxmox容器中只能运行Linux发行版。在容器内部无法运行其他操作系统，例如FreeBSD或Microsoft Windows。
+• 出于安全原因，需要限制对主机资源的访问。因此，容器在它们自己的独立命名空间中运行。此外，一些系统调用（用户空间对Linux内核的请求）在容器内不允许。
+Proxmox VE 使用 Linux 容器（LXC）作为其底层容器技术。 “Proxmox容器工具包”（pct）通过提供一个抽象复杂任务的接口，简化了LXC的使用和管理。
+容器与Proxmox VE紧密集成。这意味着它们知道集群设置，并且可以像虚拟机一样使用相同的网络和存储资源。您还可以使用Proxmox VE防火墙或使用HA框架管理容器。
+我们的主要目标是提供一个环境，提供使用VM的好处，但不需要额外的开销。这意味着Proxmox容器可以被归类为“系统容器”，而不是“应用程序容器”。
+注意
+如果您想运行应用程序容器，例如Docker镜像，建议您在Proxmox QEMU 
+VM中运行它们。这将为您提供所有应用程序容器化的优势，同时还提供VM提供的好处，如与主机的强隔离和实时迁移能力，这在容器中否则无法实现。
+
+11.1 技术概述
+• LXC（https://linuxcontainers.org/）
+• 集成到 Proxmox VE 图形化 Web 用户界面（GUI）
+• 易于使用的命令行工具pct
+• 通过 Proxmox VE REST API 访问
+• lxcfs 提供容器化的 /proc 文件系统
+• 控制组（cgroups）用于资源隔离和限制
+• 使用 AppArmor 和 seccomp 提高安全性
+• 现代 Linux 内核
+• 基于镜像的部署（模板 第11.2节）
+• 使用 Proxmox VE 存储库第7章
+• 从主机进行容器设置（网络，DNS，存储等）
+
+11.2 支持的发行版
+下面是官方支持的发行版列表。
+以下发行版的模板可以通过我们的存储库获得。您可以使用pveam 第11.3节工具或图形用户界面下载它们。
+
+11.2.1 Alpine Linux
+Alpine Linux 是基于 musl libc 和 busybox 的安全导向的轻量级 Linux 发行版。
+    https://alpinelinux.org
+    有关当前支持的版本，请参见：
+    https://alpinelinux.org/releases/
+    11.2.2 Arch Linux
+    Arch Linux，一款轻量级且灵活的 Linux® 发行版，试图保持简单。
+    https://archlinux.org/
+    Arch Linux 使用滚动发布模型，有关更多详细信息，请参阅其维基：
+    https://wiki.archlinux.org/title/Arch_Linux
+
+11.2.3 CentOS、Almalinux、Rocky Linux
+CentOS / CentOS Stream
+CentOS Linux 发行版是一个稳定、可预测、可管理和可复制的平台，源自 Red Hat Enterprise Linux（RHEL）的源代码。
+    https://centos.org
+    有关当前支持的版本，请参见：
+    https://wiki.centos.org/About/Product
+    Almalinux
+    一个开源、社区拥有和管理的永久免费企业级 Linux 发行版，专注于长期稳定性，提供一个强大的生产级平台。AlmaLinux OS 与 RHEL® 和预先配置的 CentOS 具有 1:1 二进制兼容性。
+    https://almalinux.org
+    有关当前支持的版本，请参见：
+    https://en.wikipedia.org/wiki/AlmaLinux#Releases
+    Rocky Linux
+    Rocky Linux 是一个社区企业操作系统，旨在与美国顶级企业级 Linux 发行版实现 100% 缺陷兼容，现在其下游合作伙伴已经改变方向。
+    https://rockylinux.org
+    有关当前支持的版本，请参见：
+    https://en.wikipedia.org/wiki/Rocky_Linux#Releases
+
+11.2.4 Debian
+    Debian 是一个免费的操作系统，由 Debian 项目开发和维护。一个免费的 Linux 发行版，拥有数千个应用程序，以满足我们用户的需求。
+    https://www.debian.org/intro/index#software
+    有关当前支持的版本，请参见：
+    https://www.debian.org/releases/stable/releasenotes
+
+11.2.5 Devuan
+Devuan GNU+Linux 是 Debian 的一个没有 systemd 的分支，允许用户通过避免不必要的纠缠并确保 Init Freedom 来重新控制他们的系统。
+    https://www.devuan.org
+    有关当前支持的版本，请参见：
+    https://www.devuan.org/os/releases
+    
+11.2.6 Fedora
+    Fedora 为硬件、云和容器创建了一个创新的、免费的、开源平台，使软件开发人员和社区成员能够为他们的用户构建定制解决方案。
+    https://getfedora.org
+    有关当前支持的版本，请参见：
+    https://fedoraproject.org/wiki/Releases
+
+11.2.7 Gentoo
+    高度灵活的基于源代码的 Linux 发行版。
+    https://www.gentoo.org
+    Gentoo 使用滚动发布模型。
+
+11.2.8 OpenSUSE
+    系统管理员、开发人员和桌面用户的首选。
+    https://www.opensuse.org
+    有关当前支持的版本，请参见：
+    https://get.opensuse.org/leap/
+
+11.2.9 Ubuntu
+    Ubuntu 是适用于企业服务器、桌面、云和物联网的现代、开源的 Linux 操作系统。
+    https://ubuntu.com/
+    有关当前支持的版本，请参见：
+    https://wiki.ubuntu.com/Releases
+
+11.3 容器镜像
+容器镜像有时也被称为“模板”或“应用程序”，它们是包含运行容器所需的一切的 tar 归档文件。
+Proxmox VE 本身为最常见的 Linux 发行版（第 11.2 节）提供了各种基本模板。它们可以使用 GUI 或 pveam（Proxmox VE Appliance Manager 
+的缩写）命令行实用程序下载。此外，还可以下载 TurnKey Linux 容器模板。
+通过 pve-daily-update 计时器，可用模板列表每天更新一次。您还可以通过执行以下命令手动触发更新：
+pveam update
+要查看可用镜像列表，请运行：
+pveam available
+您可以通过指定感兴趣的部分来限制此大型列表，例如基本系统镜像：
+列出可用的系统镜像
+# pveam available --section system
+system alpine-3.12-default_20200823_amd64.tar.xz
+system alpine-3.13-default_20210419_amd64.tar.xz
+system alpine-3.14-default_20210623_amd64.tar.xz
+system archlinux-base_20210420-1_amd64.tar.gz
+system centos-7-default_20190926_amd64.tar.xz
+system centos-8-default_20201210_amd64.tar.xz
+system debian-9.0-standard_9.7-1_amd64.tar.gz
+system debian-10-standard_10.7-1_amd64.tar.gz
+system devuan-3.0-standard_3.0_amd64.tar.gz
+system fedora-33-default_20201115_amd64.tar.xz
+system fedora-34-default_20210427_amd64.tar.xz
+system gentoo-current-default_20200310_amd64.tar.xz
+system opensuse-15.2-default_20200824_amd64.tar.xz
+system ubuntu-16.04-standard_16.04.5-1_amd64.tar.gz
+system ubuntu-18.04-standard_18.04.1-1_amd64.tar.gz
+system ubuntu-20.04-standard_20.04-1_amd64.tar.gz
+system ubuntu-20.10-standard_20.10-1_amd64.tar.gz
+system ubuntu-21.04-standard_21.04-1_amd64.tar.gz
+在使用这样的模板之前，您需要将它们下载到您的存储中。如果您不确定要下载到哪个存储，可以简单地使用名为 local 的存储。
+对于集群安装，建议使用共享存储，以便所有节点都可以访问这些镜像。
+pveam download local debian-10.0-standard_10.0-1_amd64.tar.gz
+现在您已经准备好使用该镜像创建容器，您可以使用以下命令列出存储 local 上的所有已下载镜像：
+# pveam list local
+local:vztmpl/debian-10.0-standard_10.0-1_amd64.tar.gz 219.95MB
+提示
+您还可以使用 Proxmox VE Web 界面 GUI 下载、列出和删除容器模板。
+pct 使用它们来创建一个新容器，例如：
+pct create 999 local:vztmpl/debian-10.0-standard_10.0-1_amd64.tar.gz
+上面的命令显示了完整的 Proxmox VE 卷标识符。它们包括存储名称，而且大多数其他 Proxmox VE 命令都可以使用它们。例如，您可以稍后使用以下命令删除该镜像：
+pveam remove local:vztmpl/debian-10.0-standard_10.0-1_amd64.tar.gz
+
+11.4 容器设置
+
+11.4.1 一般设置
+容器的一般设置包括：
+• 节点：运行容器的物理服务器
+• CT ID：在此 Proxmox VE 安装中用于标识容器的唯一编号
+• 主机名：容器的主机名
+• 资源池：容器和虚拟机的逻辑组
+• 密码：容器的 root 密码
+• SSH 公钥：用于通过 SSH 连接到 root 帐户的公钥
+• 非特权容器：此选项允许在创建时选择是否要创建特权或非特权容器。
+非特权容器
+非特权容器使用一种名为用户命名空间的新内核功能。容器内的 root UID 0 
+映射到容器外的非特权用户。这意味着这些容器中的大多数安全问题（容器逃逸、资源滥用等）将影响随机的非特权用户，并将成为一般内核安全漏洞而非 LXC 问题。
+LXC 团队认为非特权容器在设计上是安全的。
+这是创建新容器时的默认选项。
+注意
+如果容器使用 systemd 作为 init 系统，请注意容器内运行的 systemd 版本应等于或大于 220。
+特权容器
+容器中的安全性是通过使用强制访问控制 AppArmor 限制、seccomp 过滤器和 Linux 内核命名空间来实现的。
+LXC 团队认为这种容器是不安全的，他们不会认为新的容器逃逸漏洞是值得 CVE 和快速修复的安全问题。这就是为什么特权容器只应在受信任的环境中使用。
+
+11.4.2 CPU
+您可以使用 cores 选项限制容器内可见的 CPU 数量。这是通过使用 Linux cpuset cgroup（控制组）来实现的。pvestatd 中的一个特殊任务会定期尝试在可用 CPU 
+之间分配运行中的容器。要查看分配的 CPU，请运行以下命令：
+# pct cpusets
+---------------------
+102: 6 7
+105: 2 3 4 5
+108: 0 1
+---------------------
+容器直接使用主机内核。容器内的所有任务都由主机 CPU 调度程序处理。
+Proxmox VE 默认使用 Linux CFS（完全公平调度程序）调度程序，该调度程序具有额外的带宽控制选项。
+cpulimit：您可以使用此选项进一步限制分配的 CPU 时间。请注意，这是一个浮点数，因此将两个内核分配给容器但将整体 CPU 消耗限制在半个内核是完全有效的。
+cores：2
+cpulimit：0.5
+cpuunits：这是传递给内核调度程序的相对权重。数字越大，此容器获得的 CPU 时间越多。数字与所有其他运行容器的权重相关。
+默认值为 100（如果主机使用传统的 cgroup v1，则为 1024）。
+您可以使用此设置优先考虑某些容器。
+
+11.4.3 内存
+容器内存使用 cgroup 内存控制器进行控制。
+memory：限制整体内存使用。这对应于 memory.limit_in_bytes cgroup 设置。
+swap：允许容器从主机交换空间使用额外的交换内存。这对应于 memory.memsw.limit_in_bytes cgroup 设置，该设置设置为两个值（内存 + 交换）之和。
+
+11.4.4 挂载点
+根挂载点使用 rootfs 属性进行配置。您可以配置多达 256 个其他挂载点。相应的选项称为 mp0 到 mp255。它们可以包含以下设置：
+rootfs: [volume=]<volume> [,acl=<1|0>]
+[,mountoptions=<opt[;opt...]>] [,quota=<1|0>] [,replicate=<1|0>]
+[,ro=<1|0>] [,shared=<1|0>] [,size=<DiskSize>]
+将卷用作容器根。有关所有选项的详细说明，请参阅下文。
+mp[n]: [volume=]<volume> ,mp=<Path> [,acl=<1|0>] [,backup=<1|0>]
+[,mountoptions=<opt[;opt...]>] [,quota=<1|0>] [,replicate=<1|0>]
+[,ro=<1|0>] [,shared=<1|0>] [,size=<DiskSize>]
+将卷用作容器挂载点。使用特殊语法 STORAGE_ID:SIZE_IN_GiB 分配一个新卷。
+acl=<boolean>
+明确启用或禁用 ACL 支持。
+backup=<boolean>
+是否在备份中包含挂载点（仅用于卷挂载点）。
+mountoptions=<opt[;opt...]>
+rootfs/mps 的额外挂载选项。
+mp=<Path>
+从容器内部看到的挂载点路径。
+注意
+出于安全原因，不得包含任何符号链接。
+quota=<boolean>
+在容器内启用用户配额（不支持 zfs 子卷）
+replicate=<boolean> (默认值 = 1)
+将此卷包含在存储复制作业中。
+ro=<boolean>
+只读挂载点
+shared=<boolean> (默认值 = 0)
+将此非卷挂载点标记为在所有节点上可用。
+警告
+此选项不会自动共享挂载点，而是假定它已经共享！
+size=<DiskSize>
+卷大小（只读值）。
+volume=<volume>
+要挂载到容器中的卷、设备或目录。
+目前有三种类型的挂载点：存储支持的挂载点、绑定挂载和设备挂载。
+典型的容器 rootfs 配置
+rootfs: thin1:base-100-disk-1,size=8G
+存储支持的挂载点
+存储支持的挂载点由 Proxmox VE 存储子系统管理，分为三种不同类型：
+• 基于镜像：这些是包含单个 ext4 格式文件系统的原始镜像。
+• ZFS 子卷：这些在技术上是绑定挂载，但具有托管存储，因此允许调整大小和快照。
+• 目录：传递 size=0 触发一种特殊情况，在这种情况下，会创建一个目录，而不是原始镜像。
+注意
+存储支持的挂载点卷的特殊选项语法 STORAGE_ID:SIZE_IN_GB 将自动在指定的存储上分配指定大小的卷。例如，调用
+pct set 100 -mp0 thin1:10,mp=/path/in/container
+将在 thin1 存储上分配一个 10GB 的卷，并用分配的卷 ID 替换占位符 10，并在容器的 /path/in/container 中设置挂载点。
+绑定挂载点
+绑定挂载允许您在容器内访问 Proxmox VE 主机上的任意目录。一些可能的用例包括：
+• 在客户机中访问主目录
+• 在客户机中访问 USB 设备目录
+• 在客户机中访问主机的 NFS 挂载
+绑定挂载被认为不受存储子系统管理，因此您无法从容器内部进行快照或处理配额。对于非特权容器，您可能会遇到由用户映射引起的权限问题，并且无法使用 ACL。
+注意
+使用 vzdump 备份时，绑定挂载点的内容不会被备份。
+警告
+出于安全原因，绑定挂载应该只使用专门为此目的保留的源目录，例如 /mnt/bindmounts 下的目录层次结构。
+切勿将系统目录（如 /, /var 或 /etc）绑定到容器中，这会带来很大的安全风险。
+注意
+绑定挂载源路径不能包含任何符号链接。
+例如，要将目录 /mnt/bindmounts/shared 在 ID 为 100 的容器下的路径 /shared 中访问，可以添加如下配置行：
+mp0: /mnt/bindmounts/shared,mp=/shared
+放入 /etc/pve/lxc/100.conf。
+或者使用 pct 工具：
+pct set 100 -mp0 /mnt/bindmounts/shared,mp=/shared
+以达到相同的效果。
+设备挂载点
+设备挂载点允许将主机的块设备直接挂载到容器中。与绑定挂载类似，设备挂载不受 Proxmox VE 存储子系统管理，但会遵循配额和 acl 选项。
+注意
+设备挂载点应仅在特殊情况下使用。在大多数情况下，存储支持的挂载点提供相同的性能和更多功能。
+注意
+使用 vzdump 备份时，设备挂载点的内容不会被备份。
+
+11.4.5 网络
+您可以为单个容器配置多达 10 个网络接口。相应的选项称为 net0 到 net9，它们可以包含以下设置：
+net[n]: name=<string> [,bridge=<bridge>] [,firewall=<1|0>]
+[,gw=<GatewayIPv4>] [,gw6=<GatewayIPv6>]
+[,hwaddr=XX:XX:XX:XX:XX:XX] [,ip=<(IPv4/CIDR|dhcp|manual)>]
+[,ip6=<(IPv6/CIDR|auto|dhcp|manual)>] [,link_down=<1|0>]
+[,mtu=<integer>] [,rate=<mbps>] [,tag=<integer>]
+[,trunks=<vlanid[;vlanid...]>] [,type=<veth>]
+为容器指定网络接口。
+bridge=<bridge>
+将网络设备连接到的桥。
+firewall=<boolean>
+控制是否使用此接口的防火墙规则。
+gw=<GatewayIPv4>
+IPv4 流量的默认网关。
+gw6=<GatewayIPv6>
+IPv6 流量的默认网关。
+hwaddr=XX:XX:XX:XX:XX:XX
+未设置 I/G（个体/组）位的通用 MAC 地址。
+ip=<(IPv4/CIDR|dhcp|manual)>
+CIDR 格式的 IPv4 地址。
+ip6=<(IPv6/CIDR|auto|dhcp|manual)>
+CIDR 格式的 IPv6 地址。
+link_down=<boolean>
+此接口是否应断开连接（如拔掉插头）。
+mtu=<integer> (64 - 65535)
+接口的最大传输单元（lxc.network.mtu）。
+name=<string>
+容器内部看到的网络设备名称（lxc.network.name）。
+rate=<mbps>
+对接口应用速率限制
+tag=<integer> (1 - 4094)
+此接口的 VLAN 标签。
+trunks=<vlanid[;vlanid...]>
+通过接口传递的 VLAN ID
+type=<veth>
+网络接口类型。
+
+11.4.6 容器的自动启动和关闭
+要在主机系统启动时自动启动容器，请在 Web 界面的容器选项面板中选择“开机启动”选项，或运行以下命令：
+pct set CTID -onboot 1
+启动和关闭顺序
+如果您想微调容器的启动顺序，可以使用以下参数：
+• 启动/关闭顺序：定义启动顺序优先级。例如，如果您希望 CT 成为第一个启动的容器，请将其设置为 1。
+（我们使用相反的启动顺序进行关闭，因此启动顺序为 1 的容器将是最后一个被关闭的）
+• 启动延迟：定义此容器启动和后续容器启动之间的间隔。例如，如果您希望在启动其他容器之前等待 240 秒，请将其设置为 240。
+• 关闭超时：定义 Proxmox VE 在发出关闭命令后应等待容器离线的秒数。
+默认情况下，此值设置为 60，这意味着 Proxmox VE 将发出关闭请求，等待 60 秒，以使机器离线，如果 60 秒后机器仍然在线，则通知关闭操作失败。
+请注意，没有设置启动/关闭顺序参数的容器将始终在设置了该参数的容器之后启动，而且此参数仅对本地运行在主机上的虚拟机有意义，而不是整个集群范围。
+如果需要在主机启动和第一个容器启动之间有延迟，请参阅 Proxmox VE 节点管理第 3.10.4 节。
+
+11.4.7 Hookscripts
+您可以使用配置属性 hookscript 为 CT 添加一个钩子脚本。
+pct set 100 -hookscript local:snippets/hookscript.pl
+在客户端生命周期的各个阶段，将调用它。有关示例和文档，请参阅 /usr/share/pve-docs/examples/guest-example-hookscript.pl 下的示例脚本。
+
+11.5 安全考虑
+容器使用主机系统的内核。这为恶意用户暴露了攻击面。一般来说，完全虚拟化的机器提供更好的隔离。如果为未知或不受信任的人提供容器，应考虑这一点。
+为减少攻击面，LXC 使用了许多安全功能，如 AppArmor、CGroups 和内核命名空间。
+
+11.5.1 AppArmor
+AppArmor 配置文件用于限制可能危险操作的访问。某些系统调用，即挂载操作，被禁止执行。
+要追踪 AppArmor 活动，请使用：
+dmesg | grep apparmor
+虽然不推荐，但可以为容器禁用 AppArmor。这会带来安全风险。在容器内执行某些系统调用可能会导致权限升级，如果系统配置错误或存在 LXC 或 Linux 内核漏洞。
+要为容器禁用 AppArmor，请将以下行添加到位于 /etc/pve/lxc/CTID.conf 的容器配置文件中：
+lxc.apparmor.profile = unconfined
+警告
+请注意，这不推荐用于生产环境。
+11.5.2 控制组（cgroup）
+cgroup 是一种内核机制，用于层次化组织进程并分配系统资源。通过 cgroup 控制的主要资源是 CPU 时间、内存和交换限制以及对设备节点的访问。cgroup 也用于在进行快照之前 "冻结" 容器。
+目前有两个版本的 cgroup 可用，分别是旧版和 cgroupv2。
+从 Proxmox VE 7.0 开始，默认使用纯 cgroupv2 环境。以前使用的是 "混合" 设置，其中资源控制主要在 cgroupv1 中进行，另外还有一个 cgroupv2 控制器，可以通过 cgroup_no_v1 内核命令行参数接管某些子系统。 （有关详细信息，请参阅内核参数文档。）
+
+CGroup 版本兼容性
+关于 Proxmox VE，纯 cgroupv2 与旧混合环境之间的主要区别是：现在，cgroupv2 中的内存和交换空间是独立控制的。容器的内存和交换空间设置可以直接映射到这些值，而以前只能限制内存限制和内存与交换空间之和的限制。
+另一个重要区别是设备控制器的配置方式完全不同。因此，纯 cgroupv2 环境中目前不支持文件系统配额。
+容器的操作系统需要支持 cgroupv2，才能在纯 cgroupv2 环境中运行。运行 systemd 版本 231 或更高版本的容器支持 cgroupv2 1，不使用 systemd 作为 init 系统的容器也支持 2。
+注意
+CentOS 7 和 Ubuntu 16.10 是两个著名的 Linux 发行版，它们的 systemd 版本太旧，无法在 cgroupv2 环境中运行，您可以选择：
+• 将整个发行版升级到更新的版本。对于上述示例，可以选择 Ubuntu 18.04 或 20.04，以及 CentOS 8（或 RHEL/CentOS 衍生版，如 AlmaLinux 或 Rocky 
+Linux）。这样可以获得最新的错误修复和安全修复，通常还有新功能，并将 EOL 日期延长到未来。
+• 升级容器的 systemd 版本。如果发行版提供了一个 backports 存储库，这可能是一种简便快捷的临时解决方案。
+• 将容器或其服务移到虚拟机中。虚拟机与主机的交互要少得多，这就是为什么在虚拟机中可以很好地安装几十年前的操作系统版本。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1609,7 +1609,6 @@ virtio[n]: [file=]<volume> [,aio=<native|threads|io_uring>]
 [,size=<DiskSize>] [,snapshot=<1|0>] [,trans=<none|lba|auto>]
 [,werror=<enum>]
 将卷用作 VIRTIO 硬盘（n 为 0 到 15）。
-Proxmox VE 管理指南 243 / 534
 aio=<io_uring | native | threads>
 要使用的 AIO 类型。
 backup=<boolean>
