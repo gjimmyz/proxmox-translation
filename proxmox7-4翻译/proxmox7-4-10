@@ -190,8 +190,10 @@ Proxmox VE Administration Guide 190 / 534
 如果使用 NUMA 选项，建议将套接字数设置为主机系统节点数。
 vCPU 热插拔
 现代操作系统引入了在运行系统中热插拔和在一定程度上热拔出 CPU 的功能。虚拟化使我们能够避免实际硬件在这种场景下可能导致的许多（物理）问题。
-然而，这仍然是一个相对较新且复杂的功能，因此应将其使用限制在绝对需要的情况下。大部分功能可以通过其他经过充分测试且不那么复杂的功能实现，参见资源限制第 10.2.5 节。
-在 Proxmox VE 中，插入的 CPU 最大数量始终为 cores * sockets。要使用少于此总核心数的 CPU 启动 VM，可以使用 vpus 设置，它表示在 VM 启动时应插入多少个 vCPU。
+然而，这仍然是一个相对较新且复杂的功能，因此应将其使用限制在绝对需要的情况下。
+大部分功能可以通过其他经过充分测试且不那么复杂的功能实现，参见资源限制第 10.2.5 节。
+在 Proxmox VE 中，插入的 CPU 最大数量始终为 cores * sockets。
+要使用少于此总核心数的 CPU 启动 VM，可以使用 vpus 设置，它表示在 VM 启动时应插入多少个 vCPU。
 目前只有 Linux 支持此功能，需要 3.10 以上的内核，推荐使用 4.7 以上的内核。
 您可以使用以下 udev 规则在客户端中自动将新 CPU 设置为在线状态：
 SUBSYSTEM=="cpu", ACTION=="add", TEST=="online", ATTR{online}=="0", ATTR{online}="1"
@@ -208,7 +210,8 @@ SUBSYSTEM=="cpu", ACTION=="add", TEST=="online", ATTR{online}=="0", ATTR{online}
 但如果您想禁用它（例如出于调试目的），只需取消选中“气球设备”或在配置中设置：
 balloon: 0
 自动内存分配
-当将最小内存设置得低于内存时，Proxmox VE 将确保为 VM 始终提供您指定的最小内存，如果主机上的 RAM 使用率低于 80%，则会动态向客户机添加内存，直到达到指定的最大内存。 
+当将最小内存设置得低于内存时，Proxmox VE 将确保为 VM 始终提供您指定的最小内存，如果主机上的 RAM 使用率低于 80%，
+则会动态向客户机添加内存，直到达到指定的最大内存。 
 当主机 RAM 不足时，VM 会将一些内存释放回主机，如果需要，交换运行中的进程，并在最后一招中启动 oom 杀手。 
 主机和客户机之间的内存传递是通过在客户机内运行的特殊气球内核驱动程序完成的，该驱动程序将从主机获取或释放内存页面。9
 当多个 VM 使用自动分配功能时，可以设置一个 Shares 系数，表示每个 VM 应占用的空闲主机内存的相对数量。 假设您有四个 VM，其中三个运行 HTTP 
@@ -341,7 +344,8 @@ source 指定在主机上从哪里读取熵，必须是以下之一：
 通过 max_bytes 和 period 参数可以指定限制，它们以每 period 毫秒为单位读取 max_bytes。
 然而，它并不代表线性关系：1024B/1000ms 意味着在 1 秒的计时器上，最多有 1 KiB 的数据可用，而不是在 1 秒的过程中将 1 KiB 
 数据流传输到客户机。因此，减少周期可以用于以更快的速度向客户机注入熵。
-默认情况下，限制设置为每 1000 毫秒 1024 字节（1 KiB/s）。建议始终使用限制器以避免客户端使用过多的主机资源。如果需要，可以使用 max_bytes 的值 0 来禁用所有限制。
+默认情况下，限制设置为每 1000 毫秒 1024 字节（1 KiB/s）。建议始终使用限制器以避免客户端使用过多的主机资源。
+如果需要，可以使用 max_bytes 的值 0 来禁用所有限制。
 
 10.2.15 设备启动顺序
 QEMU 可以告诉客户机应该从哪些设备启动，以及启动顺序。这可以在配置中通过 boot 属性指定，例如：
@@ -370,20 +374,514 @@ NVMe，则显示为磁盘，否则尝试启动到选项 ROM）。
 请注意，没有设置启动/关机顺序参数的计算机将始终在设置参数的计算机之后启动。此外，此参数只能在同一主机上运行的虚拟机之间强制执行，而不是在整个集群范围内。
 如果您需要在主机启动和第一个 VM 启动之间有延迟，请参阅有关 Proxmox VE 节点管理的部分 3.10.4。
 
+10.2.17 QEMU 客户机代理
+QEMU 客户机代理是在 VM 内部运行的服务，它在主机和客户机之间提供了通信通道。它用于交换信息并允许主机向客户机发出命令。
+例如，VM 概要面板中的 IP 地址是通过客户机代理获取的。
+或者，在开始备份时，通过客户机代理告诉客户机通过 fs-freeze 和 fs-thaw 命令同步未完成的写操作。
+为使客户机代理正常工作，必须采取以下步骤：
+    在客户机中安装代理并确保其正在运行
+    在 Proxmox VE 中启用通过代理的通信
+安装客户机代理
+对于大多数 Linux 发行版，客户机代理是可用的。软件包通常名为 qemu-guest-agent。
+对于 Windows，可以从 Fedora VirtIO 驱动程序 ISO 安装。
+启用客户机代理通信
+可以在 VM 的选项面板中启用 Proxmox VE 与客户机代理的通信。需要重新启动 VM 以使更改生效。
+自动使用 QGA 进行 TRIM
+可以启用“运行 guest-trim”选项。启用此功能后，Proxmox VE 将在以下可能将零写入存储的操作之后向客户机发出 trim 命令：
+    将磁盘移动到另一个存储
+    将 VM 实时迁移到具有本地存储的另一个节点
+    在支持瘦分配的存储上，这有助于释放未使用的空间。
+    注意
+    在 Linux 上的 ext4 存在一个问题，因为它使用内存优化以避免发出重复的 TRIM 请求。由于客户机不知道底层存储的更改，因此只有第一个 guest-trim 
+    将按预期运行。此后的请求，直到下次重启，将仅考虑从那时起发生更改的文件系统的部分。
+备份时的文件系统冻结和解冻
+默认情况下，在执行备份时，客户机文件系统通过 fs-freeze QEMU 客户机代理命令进行同步，以提供一致性。
+在 Windows 客户机上，某些应用程序可能通过挂钩到 Windows VSS（卷影复制服务）层来处理一致性备份，然后 fs-freeze 可能会干扰它。
+例如，已观察到，使用某些 SQL 服务器调用 fs-freeze 会触发 VSS 调用 SQL Writer VSS 模块，从而中断差异备份的 SQL 服务器备份链。
+对于此类设置，您可以通过将 freeze-fs-on-backup QGA 选项设置为 0 来配置 Proxmox VE 在备份时不发出冻结和解冻周期。此选项可以通过 CLI 或 API 设置。
+重要
+禁用此选项可能会导致文件系统不一致的备份，因此只有在了解操作原理的情况下才应禁用。
+故障排除
+虚拟机无法关闭
+确保安装并运行客户机代理。
+启用客户机代理后，Proxmox VE 将通过客户机代理发送关闭等电源命令。如果客户机代理未运行，命令将无法正常执行，并且关闭命令将遇到超时。
 
+10.2.18 SPICE 增强功能
+SPICE 增强功能是可选的特性，可以改善远程查看器的体验。
+要通过 GUI 启用它们，请转到虚拟机的选项面板。运行以下命令通过 CLI 启用它们：
+qm set <vmid> -spice_enhancements foldersharing=1,videostreaming=all
+注意
+要使用这些功能，虚拟机的显示必须设置为 SPICE (qxl)。
+文件夹共享
+与客户机共享本地文件夹。客户机中需要安装 spice-webdavd 守护程序。它通过位于 http://localhost:9843 的本地 WebDAV 服务器提供共享文件夹。
+对于 Windows 客户机，可以从官方 SPICE 网站下载 Spice WebDAV 守护程序的安装程序。
+大多数 Linux 发行版都有一个名为 spice-webdavd 的软件包可以安装。
+要在 Virt-Viewer（远程查看器）中共享文件夹，请转到文件 ! 首选项。选择要共享的文件夹，然后启用复选框。
+注意
+文件夹共享目前仅在 Virt-Viewer 的 Linux 版本中工作。
+警告
+实验性！目前此功能无法可靠地工作。
+视频流
+快速刷新区域被编码为视频流。有两个选项：
+    all：任何快速刷新区域都将编码为视频流。
+    filter：使用其他过滤器来决定是否应使用视频流（目前仅跳过小窗口表面）。
+    关于是否应启用视频流以及应选择哪个选项，无法给出一般性建议。在特定情况下，您的实际效果可能会有所不同。
+故障排除
+共享文件夹未显示
+确保 WebDAV 服务在客户机中已启用并正在运行。在 Windows 上，它被称为 Spice webdav 代理。
+在 Linux 中，名称为 spice-webdavd，但根据发行版的不同可能会有所不同。
+如果服务正在运行，请在客户机中的浏览器中打开 http://localhost:9843 以检查 WebDAV 服务器。重新启动 SPICE 会话可能会有所帮助。
 
+10.3 迁移
+如果您有一个集群，可以使用以下命令将 VM 迁移到另一个主机：
+qm migrate <vmid> <target>
+通常有两种机制：
+    在线迁移（又称为实时迁移）
+    离线迁移
 
+10.3.1 在线迁移
+如果您的 VM 正在运行并且没有配置本地绑定的资源（例如通过的设备），则可以在 qm 迁移命令调用中使用 --online 标志启动实时迁移。
+当 VM 正在运行时，Web 界面默认为实时迁移。
+如何工作
+在线迁移首先在目标主机上使用 incoming 标志启动一个新的 QEMU 进程，该进程仅执行基本初始化（客户机 vCPU 
+仍处于暂停状态），然后等待源虚拟机的客户机内存和设备状态数据流。所有其他资源（如磁盘）要么是共享的，要么在 VM 
+运行时状态迁移开始之前已经发送；因此只剩下内存内容和设备状态需要传输。
+一旦建立了此连接，源开始异步将内存内容发送到目标。如果源上的客户机内存发生变化，这些部分将被标记为脏，然后再次发送客户机内存数据。
+这个循环重复进行，直到运行中的源 VM 和传入的目标 VM 之间的数据差异足够小，可以在几毫秒内发送，因为这时源 VM 
+可以完全暂停，而用户或程序都不会注意到暂停，以便将剩余数据发送到目标，然后取消目标 VM 的 CPU 暂停，使其在不到一秒的时间内成为新的运行 VM。
+要求
+要使实时迁移正常工作，需要满足以下条件：
+    VM 没有无法迁移的本地资源。例如，当前阻止实时迁移的 PCI 或 USB 设备。另一方面，本地磁盘可以通过将它们发送到目标来进行迁移。
+    主机位于同一个 Proxmox VE 集群中。
+    主机之间具有正常且可靠的网络连接。
+    目标主机必须具有相同或更高版本的 Proxmox VE 软件包。尽管有时候反过来也可以工作，但不能保证。
+    主机具有来自相同供应商且具有类似功能的 CPU。
+    不同供应商可能会根据实际型号和 VM 配置的 CPU 类型而有所不同，但不能保证 - 因此请在将此类设置部署到生产环境之前进行测试。
 
+10.3.2 离线迁移
+如果您有本地资源，只要所有磁盘都存储在两个主机上定义的存储上，您仍然可以离线迁移您的 
+VM。然后，迁移会像在线迁移一样将磁盘通过网络复制到目标主机。请注意，任何硬件直通配置可能需要根据目标主机上的设备位置进行调整。
 
+10.4 副本和克隆
+VM 的安装通常是使用操作系统供应商的安装介质（CD-ROM）完成的。根据操作系统，这可能是一个耗时的任务，您可能希望避免。
+部署相同类型的多个 VM 的简单方法是复制现有的 VM。我们使用术语克隆来表示这样的副本，并区分链接克隆和完全克隆。
+完全克隆
+这种复制的结果是一个独立的 VM。新的 VM 不与原始 VM 共享任何存储资源。
+可以选择目标存储，因此可以将 VM 迁移到完全不同的存储。如果存储驱动程序支持多种格式，您还可以更改磁盘映像格式。
+注意
+完全克隆需要读取和复制所有 VM 镜像数据。这通常比创建链接克隆慢得多。
+某些存储类型允许复制特定快照，这默认为当前 VM 数据。这也意味着最终的副本永远不会包含来自原始 VM 的任何其他快照。
+链接克隆
+现代存储驱动程序支持一种生成快速链接克隆的方法。这样的克隆是一个可写副本，其初始内容与原始数据相同。
+创建链接克隆几乎是瞬时的，最初不会占用额外的空间。
+它们被称为链接克隆，因为新映像仍然引用原始映像。未修改的数据块从原始映像中读取，但修改过的数据块从新位置写入（然后从新位置读取）。
+这种技术称为写时复制。
+这要求原始卷是只读的。使用 Proxmox VE，可以将任何 VM 转换为只读模板。以后可以使用这些模板高效地创建链接克隆。
+注意
+在链接克隆存在时，您不能删除原始模板。
+对于链接克隆，无法更改目标存储，因为这是存储内部功能。
+目标节点选项允许您在不同的节点上创建新的 VM。唯一的限制是 VM 位于共享存储上，并且该存储也在目标节点上可用。
+为避免资源冲突，所有网络接口 MAC 地址会被随机化，我们为 VM BIOS（smbios1）设置生成新的 UUID。
 
+10.5 虚拟机模板
+可以将 VM 转换为模板。这些模板是只读的，您可以使用它们创建链接克隆。
+注意
+模板无法启动，因为这会修改磁盘映像。如果要更改模板，请创建链接克隆并修改它。
 
+10.6 VM 生成 ID
+Proxmox VE 支持虚拟机生成 ID（vmgenid）14用于虚拟机。客户操作系统可以使用此功能检测导致时间偏移事件的任何事件，例如恢复备份或快照回滚。
+14官方 vmgenid 规范 https://docs.microsoft.com/en-us/windows/desktop/hyperv_v2/virtual-machine-generation-identifier
+在创建新 VM 时，将自动生成 vmgenid 并将其保存在其配置文件中。
+要为已经存在的 VM 创建并添加 vmgenid，可以将特殊值“1”传递给 Proxmox VE 以自动生成，也可以手动设置 UUID 15 作为值，例如：
+qm set VMID -vmgenid 1
+qm set VMID -vmgenid 00000000-0000-0000-0000-000000000000
+注意
+将 vmgenid 设备添加到现有 VM 的初始操作可能导致快照回滚、备份还原等更改的相同效果，因为 VM 可能将其解释为生成更改。
+在极少数情况下，如果不希望使用 vmgenid 机制，可以在创建 VM 时为其值传递“0”，或使用以下命令在配置中回溯删除属性：
+qm set VMID -delete vmgenid
+vmgenid 的最显著用例是较新的 Microsoft Windows 操作系统，它们使用它来避免在快照回滚、
+备份还原或整个 VM 克隆操作中遇到时间敏感或复制服务（如数据库或域控制器 16）的问题。
 
+10.7 导入虚拟机和磁盘映像
+从外部虚拟机管理器导出的 VM 通常采用一个或多个磁盘映像的形式，配置文件描述了 VM 的设置（RAM，内核数量）。
+如果磁盘来自 VMware 或 VirtualBox，磁盘映像可以采用 vmdk 格式；如果磁盘来自 KVM 虚拟机管理器，则可以采用 qcow2 格式。VM 导出的最流行配置格式是 OVF 
+标准，但实际上互操作性受限，因为许多设置未在标准本身中实现，虚拟机管理器将补充信息导出为非标准扩展。
+除了格式问题外，如果从一个虚拟机管理器更改为另一个虚拟机管理器时，模拟硬件的变化过大，从其他虚拟机管理器导入磁盘映像可能会失败。Windows VM 
+尤其受此影响，因为操作系统对任何硬件更改非常挑剔。在导出前安装 MergeIDE.zip 实用程序并在启动导入的 Windows VM 之前选择 IDE 硬盘类型可以解决这个问题。
+最后，还有一个问题是关于准虚拟化驱动程序，这些驱动程序可以提高模拟系统的速度，并且特定于虚拟机管理程序。GNU/Linux 和其他免费的 Unix 
+操作系统默认已经安装了所有必要的驱动程序，您可以在导入虚拟机后立即切换到准虚拟化驱动程序。对于 Windows 虚拟机，您需要自己安装 Windows 准虚拟化驱动程序。
+通常，GNU/Linux 和其他免费的 Unix 虚拟机可以轻松导入。请注意，由于上述问题，我们无法在所有情况下保证成功导入/导出 Windows 虚拟机。
 
+10.7.1 逐步演示 Windows OVF 导入示例
+Microsoft 提供虚拟机下载以开始 Windows 开发。我们将使用其中一个来演示 OVF 导入功能。
+15在线 GUID 生成器 http://guid.one/
+16https://docs.microsoft.com/en-us/windows-server/identity/ad-ds/get-started/virtual-dc/virtualized-domain-controllerarchitecture
+下载虚拟机 zip 文件
+在了解用户协议后，选择 VMware 平台的 Windows 10 Enterprise (Evaluation - Build)，并下载 zip 文件。
+从 zip 文件中提取磁盘映像
+使用 unzip 实用程序或您选择的任何压缩工具解压缩 zip 文件，然后通过 ssh/scp 将 ovf 和 vmdk 文件复制到您的 Proxmox VE 主机。
+导入虚拟机
+这将创建一个新的虚拟机，使用从 OVF 清单中读取的核心、内存和 VM 名称，并将磁盘导入到 local-lvm 存储中。您需要手动配置网络。
+qm importovf 999 WinDev1709Eval.ovf local-lvm
+现在，虚拟机已准备好启动。
 
+10.7.2 向虚拟机添加外部磁盘映像
+您还可以将现有磁盘映像添加到 VM，无论是来自外部虚拟机管理程序还是您自己创建的映像。
+假设您使用 vmdebootstrap 工具创建了一个 Debian/Ubuntu 磁盘映像：
+vmdebootstrap --verbose \
+--size 10GiB --serial-console \
+--grub --no-extlinux \
+--package openssh-server \
+--package avahi-daemon \
+--package qemu-guest-agent \
+--hostname vm600 --enable-dhcp \
+--customize=./copy_pub_ssh.sh \
+--sparse --image vm600.raw
+现在，您可以创建一个新的目标 VM，将映像导入到存储 pvedir 并将其连接到 VM 的 SCSI 控制器：
+# qm create 600 --net0 virtio,bridge=vmbr0 --name vm600 --serial0 socket \
+--boot order=scsi0 --scsihw virtio-scsi-pci --ostype l26 \
+--scsi0 pvedir:0,import-from=/path/to/dir/vm600.raw
+VM已准备好启动。
 
+10.8 Cloud-Init 支持
+Cloud-Init 是一个事实上的多发行版软件包，用于处理虚拟机实例的早期初始化。使用 Cloud-Init，可以在虚拟机管理程序端配置网络设备和 ssh 密钥。
+当 VM 第一次启动时，VM 内的 Cloud-Init 软件将应用这些设置。
+许多 Linux 发行版提供现成的 Cloud-Init 映像，主要为 OpenStack 设计。这些映像也适用于 Proxmox 
+VE。虽然使用这些现成的映像似乎很方便，但我们通常建议您自己准备映像。这样的优点是您将确切知道已安装了什么，这将有助于您以后轻松地根据需要定制映像。
+创建了这样一个 Cloud-Init 映像后，我们建议将其转换为 VM 模板。从 VM 模板中，您可以快速创建链接克隆，这是快速部署新 VM 实例的方法。在启动新 VM 
+之前，您只需配置网络（可能还有 ssh 密钥）。
+我们建议使用基于 SSH 密钥的身份验证来登录由 Cloud-Init 部署的 VM。也可以设置密码，但这不如使用基于 SSH 密钥的身份验证安全，
+因为 Proxmox VE 需要将该密码的加密版本存储在 Cloud-Init 数据中。
+Proxmox VE 生成一个 ISO 映像，将 Cloud-Init 数据传递给 VM。为此，所有 Cloud-Init VM 都需要分配一个 CD-ROM 驱动器。通常，应添加一个串行控制台并用作显示器。
+许多 Cloud-Init 映像依赖于此，这是 OpenStack 的要求。然而，其他映像可能会在此配置下出现问题。如果使用串行控制台不起作用，请切换回默认显示配置。
 
+10.8.1 准备 Cloud-Init 模板
+第一步是准备您的 VM。基本上，您可以使用任何 VM。只需在要准备的 VM 内安装 Cloud-Init 软件包。在基于 Debian/Ubuntu 的系统上，这非常简单：
+apt-get install cloud-init
+警告
+此命令仅在 VM 内执行，而不是在 Proxmox VE 主机上执行。
+许多发行版已经提供现成的 Cloud-Init 映像（以 .qcow2 文件形式提供），因此您可以简单地下载并导入这些映像。
+在以下示例中，我们将使用 Ubuntu 提供的云映像，网址为 https://cloud-images.ubuntu.com。
+# 下载映像
+wget https://cloud-images.ubuntu.com/bionic/current/bionic-server-cloudimg-amd64.img
+# 使用 VirtIO SCSI 控制器创建一个新的 VM
+qm create 9000 --memory 2048 --net0 virtio,bridge=vmbr0 --scsihw virtio-scsi-pci
+# 将下载的磁盘导入到 local-lvm 存储中，作为 SCSI 驱动器进行连接
+qm set 9000 --scsi0 local-lvm:0,import-from=/path/to/bionic-server-cloudimg-amd64.img
+注意
+Ubuntu Cloud-Init 映像要求 SCSI 驱动器使用 virtio-scsi-pci 控制器类型。
+添加 Cloud-Init CD-ROM 驱动器
+下一步是配置一个 CD-ROM 驱动器，该驱动器将用于将 Cloud-Init 数据传递给 VM。
+qm set 9000 --ide2 local-lvm:cloudinit
+为了能够直接从 Cloud-Init 映像引导，将启动参数设置为 order=scsi0，以限制 BIOS 仅从此磁盘启动。这将加快启动速度，因为 VM BIOS 跳过了对可引导 CD-ROM 的测试。
+qm set 9000 --boot order=scsi0
+对于许多 Cloud-Init 映像，需要配置一个串行控制台并将其用作显示器。但是，如果给定映像的配置不起作用，请切换回默认显示。
+qm set 9000 --serial0 socket --vga serial0
+最后一步，将 VM 转换为模板会很有帮助。然后，您可以从此模板快速创建链接克隆。从 VM 模板部署比创建完整克隆（复制）要快得多。
+qm template 9000
+完成这些步骤后，您的 VM 就已转换为模板。从此模板，您可以快速创建并部署新的 VM 实例。
 
+10.8.2 部署 Cloud-Init 模板
+您可以通过克隆轻松部署此类模板：
+qm clone 9000 123 --name ubuntu2
+然后配置用于身份验证的 SSH 公钥，并配置 IP 设置：
+qm set 123 --sshkey ~/.ssh/id_rsa.pub
+qm set 123 --ipconfig0 ip=10.0.10.123/24,gw=10.0.10.1
+您还可以使用单个命令配置所有 Cloud-Init 选项。我们只是将上述示例拆分为几个命令以减少行长度。同时确保根据您的特定环境采用 IP 设置。
 
+10.8.3 自定义 Cloud-Init 配置
+Cloud-Init 集成还允许使用自定义配置文件而不是自动生成的配置。这是通过命令行上的 cicustom 选项完成的：
+qm set 9000 --cicustom "user=<volume>,network=<volume>,meta=<volume>"
+自定义配置文件必须位于支持片段的存储上，并且必须在 VM 要迁移到的所有节点上可用。否则，VM 将无法启动。例如：
+qm set 9000 --cicustom "user=local:snippets/userconfig.yaml"
+Cloud-Init 有三种配置。第一种是用户配置，如上例所示。第二种是网络配置，第三种是元配置。它们都可以一起指定或根据需要混合搭配。
+对于没有指定自定义配置文件的任何配置，将使用自动生成的配置。
+可以将生成的配置转储为自定义配置的基础：
+qm cloudinit dump 9000 user
+同样的命令也适用于网络和元配置。
+
+10.8.4 Cloud-Init 特定选项
+cicustom: [meta=<volume>] [,network=<volume>] [,user=<volume>]
+[,vendor=<volume>]
+指定在启动时替换自动生成的文件。
+meta=<volume>
+指定一个包含所有通过 cloud-init 传递给 VM 的元数据的自定义文件。这是特定于提供商的，意味着 configdrive2 和 nocloud 不同。
+network=<volume>
+传递包含所有网络数据的自定义文件，通过 cloud-init 传递给 VM。
+user=<volume>
+传递包含所有用户数据的自定义文件，通过 cloud-init 传递给 VM。
+vendor=<volume>
+传递包含所有供应商数据的自定义文件，通过 cloud-init 传递给 VM。
+cipassword: <string>
+分配给用户的密码。通常不建议使用此选项。请改用 ssh 密钥。还要注意，较旧的 cloud-init 版本不支持散列密码。
+citype: <configdrive2 | nocloud | opennebula>
+指定 cloud-init 配置格式。默认值取决于配置的操作系统类型（ostype）。我们对于 Linux 使用 nocloud 格式，对于 Windows 使用 configdrive2。
+ciuser: <string>
+要更改 ssh 密钥和密码的用户名，而不是镜像配置的默认用户。
+ipconfig[n]: [gw=<GatewayIPv4>] [,gw6=<GatewayIPv6>]
+[,ip=<IPv4Format/CIDR>] [,ip6=<IPv6Format/CIDR>]
+指定相应接口的 IP 地址和网关。
+IP 地址使用 CIDR 表示法，网关是可选的，但需要指定相同类型的 IP。特殊字符串 dhcp 可用于使用 DHCP 的 IP 地址，在这种情况下不应提供显式网关。
+对于 IPv6，特殊字符串 auto 可用于使用无状态自动配置。这需要 cloud-init 19.4 或更新版本。
+如果启用了 cloud-init 并且未指定 IPv4 或 IPv6 地址，则默认在 IPv4 上使用 dhcp。
+gw=<GatewayIPv4>
+IPv4 流量的默认网关。
+注意
+需要选项：ip
+gw6=<GatewayIPv6>
+IPv6 流量的默认网关。
+注意
+需要选项：ip6
+ip=<IPv4Format/CIDR> (默认 = dhcp)
+CIDR 格式的 IPv4 地址。
+ip6=<IPv6Format/CIDR> (默认 = dhcp)
+CIDR 格式的 IPv6 地址。
+nameserver: <string>
+为容器设置 DNS 服务器 IP 地址。如果未设置 searchdomain 或 nameserver，创建将自动使用主机上的设置。
+searchdomain: <string>
+为容器设置 DNS 搜索域。如果未设置 searchdomain 或 nameserver，创建将自动使用主机上的设置。
+sshkeys: <string>
+设置公共 SSH 密钥（每行一个密钥，OpenSSH 格式）。
+
+10.9 PCI(e) 透传
+PCI(e) 透传是一种将主机上的 PCI 设备控制权交给虚拟机的机制。与使用虚拟化硬件相比，这可能具有一些优势，例如更低的延迟、更高的性能或更多的功能（例如，卸载）。
+但是，如果将设备透传给虚拟机，则不能再在主机或任何其他虚拟机中使用该设备。
+
+10.9.1 通用要求
+由于透传是一项需要硬件支持的功能，因此需要检查一些要求并进行一些准备工作以使其正常工作。
+硬件
+您的硬件需要支持 IOMMU（I/O 内存管理单元）中断重新映射，包括 CPU 和主板。
+通常，支持 VT-d 的英特尔系统和支持 AMD-Vi 的 AMD 系统支持此功能。但不能保证一切都能开箱即用，因为硬件实现不佳以及缺少或质量较低的驱动程序。
+此外，服务器级硬件往往比消费级硬件支持得更好，但即便如此，许多现代系统也可以支持这一功能。
+请咨询您的硬件供应商，以检查他们是否支持您特定设置下的 Linux 透传功能。
+配置
+确保硬件支持透传后，您需要进行一些配置以启用 PCI(e) 透传。
+IOMMU
+首先，您需要在 BIOS/UEFI 中启用 IOMMU 支持。通常，相应的设置称为 IOMMU 或 VT-d，但您应在主板手册中找到确切的选项名称。
+对于英特尔 CPU，您可能还需要通过添加以下内容在内核命令行（第 3.12.6 节）上启用 IOMMU，以便支持较旧的（5.15 之前的）内核：
+intel_iommu=on
+对于 AMD CPU，应自动启用。
+IOMMU 透传模式
+如果您的硬件支持 IOMMU 透传模式，启用此模式可能会提高性能。这是因为虚拟机绕过了超级管理程序通常执行的（默认）DMA 转换，
+而是将 DMA 请求直接传递给硬件 
+IOMMU。要启用这些选项，请将以下内容添加到内核命令行（第 3.12.6 节）：
+iommu=pt
+内核模块
+您需要确保加载了以下模块。可以通过将它们添加到 /etc/modules 来实现：
+vfio
+vfio_iommu_type1
+vfio_pci
+vfio_virqfd
+在更改任何模块相关内容后，您需要刷新 initramfs。在 Proxmox VE 上，可以通过执行以下命令完成：
+update-initramfs -u -k all
+完成配置
+最后，重新启动以使更改生效，并检查是否确实已启用。
+dmesg | grep -e DMAR -e IOMMU -e AMD-Vi
+应显示已启用 IOMMU、Directed I/O 或中断重新映射，具体取决于硬件和内核，准确的消息可能有所不同。
+同样重要的是，您要传递的设备必须位于单独的 IOMMU 组中。这可以通过以下命令进行检查：
+# find /sys/kernel/iommu_groups/ -type l
+设备与其功能（例如，带有 HDMI 音频设备的 GPU）或其根端口或 PCI(e) 桥一起位于 IOMMU 组中也是可以的。
+PCI(e) 插槽
+某些平台处理其物理 PCI(e) 插槽的方式不同。因此，如果您没有获得所需的 IOMMU 组分离，有时将卡放入另一个 PCI(e) 插槽可能会有所帮助。
+不安全中断
+对于某些平台，可能需要允许不安全中断。为此，请在 /etc/modprobe.d/ 中以 .conf 结尾的文件中添加以下行：
+options vfio_iommu_type1 allow_unsafe_interrupts=1
+请注意，此选项可能会使您的系统不稳定。
+GPU 透传注意事项
+无法通过 Proxmox VE 网络界面上的 NoVNC 或 SPICE 显示 GPU 的帧缓冲区。
+在透传整个 GPU 或 vGPU 时，如需图形输出，必须将监视器物理连接到显卡，或者在客户机中配置远程桌面软件（例如，VNC 或 RDP）。
+如果您想将 GPU 用作硬件加速器，例如，用于使用 OpenCL 或 CUDA 的程序，这是不需要的。
+
+10.9.2 主机设备透传
+最常用的 PCI(e) 透传变体是透传整个 PCI(e) 卡，例如 GPU 或网络卡。
+主机配置
+在这种情况下，主机不能使用该卡。有两种方法可以实现这一点：
+• 通过在 /etc/modprobe.d/ 中的 .conf 文件添加以下内容，将设备 ID 传递给 vfio-pci 模块的选项：
+options vfio-pci ids=1234:5678,4321:8765
+其中 1234:5678 和 4321:8765 是通过以下命令获得的供应商和设备 ID：
+lspci -nn
+• 在主机上完全屏蔽驱动程序，确保它可以自由绑定以进行透传，方法是在 /etc/modprobe.d/ 中的以 .conf 结尾的文件中添加：
+blacklist <driver_name>
+将 <driver_name> 替换为要屏蔽的驱动程序名称。
+blacklist DRIVERNAME
+对于这两种方法，您都需要再次更新 initramfs（第 10.9.1 节），然后重新启动。
+验证配置
+要检查您的更改是否成功，您可以使用以下命令：
+# lspci -nnk
+然后检查设备条目。如果它显示：
+Kernel driver in use: vfio-pci
+或者完全缺少 in use 行，那么该设备已准备好用于透传。
+虚拟机配置
+要透传设备，您需要在虚拟机配置中设置 hostpciX 选项，例如通过执行以下命令：
+# qm set VMID -hostpci0 00:02.0
+如果您的设备具有多个功能（例如，'00:02.0' 和 '00:02.1'），您可以使用简化的语法 00:02` 一起传递它们。这相当于在 web 界面中勾选 All Functions` 复选框。
+根据设备和客户操作系统，可能需要一些选项：
+• x-vga=on|off 将 PCI(e) 设备标记为 VM 的主 GPU。启用此功能时，将忽略 vga 配置选项。
+• pcie=on|off 告诉 Proxmox VE 使用 PCIe 或 PCI 端口。某些客户机/设备组合需要 PCIe 而不是 PCI。PCIe 仅适用于 q35 机器类型。
+• rombar=on|off 使固件 ROM 对客户机可见。默认值为 on。某些 PCI(e) 设备需要禁用此功能。
+• romfile=<path>，是设备要使用的 ROM 文件的可选路径。这是位于 /usr/share/kvm/ 下的相对路径。
+示例
+使用 GPU 设置为主设备的 PCIe 透传的示例：
+# qm set VMID -hostpci0 02:00,pcie=on,x-vga=on
+PCI ID 覆盖
+您可以覆盖客户机将看到的 PCI 厂商 ID、设备 ID 和子系统 ID。如果您的设备是一个变种，具有客户端驱动程序无法识别的 
+ID，但您仍希望强制加载这些驱动程序（例如，如果您知道您的设备使用与受支持变种相同的芯片组），则此功能非常有用。
+可用选项包括 vendor-id、device-id、sub-vendor-id 和 sub-device-id。您可以设置这些选项中的任何一个或全部，以覆盖设备的默认 ID。
+例如：
+# qm set VMID -hostpci0 02:00,device-id=0x10f6,sub-vendor-id=0x0000
+其他注意事项
+当进行 GPU 透传时，使用 q35 作为机器类型、OVMF（用于 VM 的 EFI）而非 SeaBIOS 以及 PCIe 而非 PCI 可以获得最佳兼容性。
+请注意，如果您想要为 GPU 透传使用 OVMF，GPU 需要具备 EFI 兼容 ROM，否则请使用 SeaBIOS。
+
+10.9.3 SR-IOV
+另一种透传 PCI(e) 设备的方法是使用您的设备（如果有）的硬件虚拟化功能。
+SR-IOV（单根输入/输出虚拟化）使单个设备能够为系统提供多个 VF（虚拟功能）。这些 VF 中的每一个都可以在不同的 VM 
+中使用，具有完整的硬件功能，并且比软件虚拟化设备具有更好的性能和更低的延迟。
+目前，最常见的用例是具有 SR-IOV 支持的 NIC（网络接口卡），每个物理端口可以提供多个 VF。这允许在 VM 中使用诸如校验和卸载等功能，从而减少（主机）CPU 开销。
+主机配置
+通常，有两种方法可以在设备上启用虚拟功能。
+    有时驱动程序模块有一个选项，例如对于一些 Intel 驱动程序：
+max_vfs=4
+这可以放在 /etc/modprobe.d/ 下以 .conf 结尾的文件中。（之后不要忘记更新 initramfs）
+请参阅驱动程序模块文档以获取确切的参数和选项。
+第二种，更通用的方法是使用 sysfs。如果设备和驱动程序支持此功能，您可以动态更改 VF 数量。例如，要在设备 0000:01:00.0 上设置 4 个 VF，请执行：
+# echo 4 > /sys/bus/pci/devices/0000:01:00.0/sriov_numvfs
+要使此更改持久生效，您可以使用 sysfsutils Debian 软件。
+VM 配置
+创建 VF 后，使用 lspci 输出时，您应该将它们视为单独的 PCI(e) 设备。获取它们的 ID，并像正常的 PCI(e) 设备一样通过它们（第 10.9.2 节）。
+其他注意事项
+对于此功能，平台支持尤为重要。可能需要首先在 BIOS/EFI 中启用此功能，或者使用特定的 PCI(e) 端口使其工作。如有疑问，请查阅平台手册或联系其供应商。
+
+10.9.4 中介设备 (vGPU, GVT-g)
+中介设备是另一种将物理硬件的功能和性能用于虚拟化硬件的方法。这些设备在虚拟化 GPU 设置中最常见，例如英特尔的 GVT-g 和 NVIDIA 的 vGPU，用于其 GRID 技术。
+借此，物理卡可以创建虚拟卡，类似于 SR-IOV。区别在于，中介设备不会作为 PCI(e) 设备出现在主机中，因此只适用于在虚拟机中使用。
+主机配置
+通常，您的卡的驱动程序必须支持该功能，否则将无法工作。因此，请参阅您的供应商以获取兼容的驱动程序以及如何配置它们。
+英特尔的 GVT-g 驱动程序已集成在内核中，并且应与第 5 代、第 6 代和第 7 代英特尔 Core 处理器以及 E3 v4、E3 v5 和 E3 v6 Xeon 处理器一起使用。
+要为英特尔图形启用它，您必须确保加载 kvmgt 模块（例如通过 /etc/modules），并在内核命令行（第 3.12.6 节）上启用它，添加以下参数：
+i915.enable_gvt=1
+此后，请记住更新 initramfs（第 10.9.1 节），然后重新启动主机。
+VM 配置
+要使用中介设备，只需在 hostpciX VM 配置选项上指定 mdev 属性。
+您可以通过 sysfs 获取受支持的设备。例如，要列出设备 0000:00:02.0 的受支持类型，只需执行：
+ls /sys/bus/pci/devices/0000:00:02.0/mdev_supported_types
+每个条目都是一个目录，其中包含以下重要文件：
+• available_instances 包含此类型仍可用的实例数量，每个 VM 中的 mdev 使用都会减少这个数量。
+• description 包含有关类型功能的简短描述
+• create 是创建此类设备的端点，如果配置了带有 mdev 的 hostpciX 选项，Proxmox VE 将自动为您执行此操作。
+使用 Intel GVT-g vGPU（Intel Skylake 6700k）的示例配置：
+qm set VMID -hostpci0 00:02.0,mdev=i915-GVTg_V5_4
+设置此选项后，Proxmox VE 会在 VM 启动时自动创建此类设备，并在 VM 停止时清理它。
+
+10.10 钩子脚本
+您可以使用配置属性 hookscript 为 VM 添加钩子脚本。
+qm set 100 --hookscript local:snippets/hookscript.pl
+它将在客户机生命周期的各个阶段被调用。有关示例和文档，请参见 /usr/share/pve-docs/examples/guest-example-hookscript.pl 下的示例脚本。
+
+10.11 休眠
+您可以使用 GUI 选项 Hibernate 或
+qm suspend ID --todisk
+将 VM 挂起到磁盘。这意味着内存的当前内容将被保存到磁盘上，并停止 VM。在下一次启动时，将加载内存内容，VM 可以从中断处继续。
+状态存储选择
+如果没有给定内存的目标存储，将自动选择以下存储中的第一个：
+    VM 配置中的 vmstatestorage 存储。
+    任何 VM 磁盘的第一个共享存储。
+    任何 VM 磁盘的第一个非共享存储。
+    作为备用的 local 存储。
+
+10.12 使用 qm 管理虚拟机
+qm 是在 Proxmox VE 上管理 QEMU/KVM 虚拟机的工具。您可以创建和销毁虚拟机，并控制执行（启动/停止/挂起/恢复）。此外，您可以使用 qm 
+设置关联配置文件中的参数。还可以创建和删除虚拟磁盘。
+
+10.12.1 命令行使用示例
+使用本地存储上的 iso 文件，在 local-lvm 存储上创建一个带有 4 GB IDE 磁盘的 VM
+qm create 300 -ide0 local-lvm:4 -net0 e1000 -cdrom local:iso/proxmox- -
+mailgateway_2.1.iso
+启动新 VM
+qm start 300
+发送关机请求，然后等待 VM 停止。
+qm shutdown 300 && qm wait 300
+与上面相同，但只等待 40 秒。
+qm shutdown 300 && qm wait 300 -timeout 40
+销毁 VM 总是从访问控制列表中删除它，并始终删除 VM 的防火墙配置。如果您要将 VM 从复制作业、备份作业和 HA 资源配置中删除，请激活 --purge。
+qm destroy 300 --purge
+将磁盘映像移动到其他存储。
+qm move-disk 300 scsi0 other-storage
+将磁盘映像分配给其他 VM。这将从源 VM 中删除磁盘 scsi1 并将其作为 scsi3 附加到目标 VM。在后台，磁盘映像被重命名，以便名称与新所有者匹配。
+qm move-disk 300 scsi1 --target-vmid 400 --target-disk scsi3
+
+10.13 配置
+VM 配置文件存储在 Proxmox 集群文件系统内，可以在 /etc/pve/qemu-server/ 中访问。与存储在 /etc/pve/ 中的其他文件一样，它们会自动复制到所有其他集群节点。
+注意
+VMID < 100 是为内部目的保留的，VMID 需要在整个集群范围内唯一。
+示例 VM 配置
+boot: order=virtio0;net0
+cores: 1
+sockets: 1
+memory: 512
+name: webmail
+ostype: l26
+net0: e1000=EE:D2:28:5F:B6:3E,bridge=vmbr0
+virtio0: local:vm-100-disk-1,size=32G
+这些配置文件是简单的文本文件，您可以使用普通的文本编辑器（如 vi、nano 等）进行编辑。这有时有助于进行小的更正，但请记住，您需要重新启动 VM 以应用此类更改。
+出于这个原因，通常最好使用 qm 命令生成和修改这些文件，或者使用 GUI 完成整个操作。我们的工具包足够智能，可以立即应用对正在运行的 VM 的大多数更改。
+此功能称为 "热插拔"，在这种情况下无需重新启动 VM。
+
+10.13.1 文件格式
+VM 配置文件使用简单的冒号分隔的键/值格式。每行的格式如下：
+这是一条注释
+OPTION: value
+这些文件中的空行将被忽略，以 # 字符开头的行将被视为注释并被忽略。
+
+10.13.2 快照
+当您创建快照时，qm 将在同一配置文件内的单独快照部分中存储快照时间的配置。例如，在创建名为“testsnapshot”的快照后，您的配置文件将如下所示：
+带快照的 VM 配置
+memory: 512
+swap: 512
+parent: testsnaphot
+...
+[testsnaphot]
+memory: 512
+swap: 512
+snaptime: 1457170803
+...
+有一些与快照相关的属性，如 parent 和 snaptime。parent 属性用于存储快照之间的父/子关系。snaptime 是快照创建时间戳（Unix 纪元）。
+您可以选择使用 vmstate 选项保存正在运行的 VM 的内存。有关 VM 状态的目标存储如何选择的详细信息，请参阅休眠章节中的状态存储选择部分 10.11。
+
+10.13.3 选项
+acpi: <boolean> (默认 = 1)
+启用/禁用 ACPI。
+affinity: <string>
+用于执行客户端进程的主机内核列表，例如：0,5,8-11
+agent: [enabled=]<1|0> [,freeze-fs-on-backup=<1|0>]
+[,fstrim_cloned_disks=<1|0>] [,type=<virtio|isa>]
+启用/禁用与 QEMU Guest Agent 及其属性的通信。
+enabled=<boolean> (默认 = 0)
+启用/禁用与在 VM 中运行的 QEMU Guest Agent (QGA) 的通信。
+freeze-fs-on-backup=<boolean> (默认 = 1)
+在备份时冻结/解冻客户机文件系统以保持一致性。
+fstrim_cloned_disks=<boolean> (默认 = 0)
+在移动磁盘或迁移 VM 后运行 fstrim。
+type=<isa | virtio> (默认 = virtio)
+选择 agent 类型
+arch: <aarch64 | x86_64>
+虚拟处理器架构。默认为主机。
+args: <string>
+传递给 kvm 的任意参数，例如：
+args: -no-reboot -no-hpet
+注意
+此选项仅适用于专家。
+audio0: device=<ich9-intel-hda|intel-hda|AC97>
+[,driver=<spice|none>]
+配置音频设备，与 QXL/Spice 结合使用非常有用。
+device=<AC97 | ich9-intel-hda | intel-hda>
+配置音频设备。
+driver=<none | spice> (默认 = spice)
+音频设备的驱动程序后端。
+autostart: <boolean> (默认 = 0)
+崩溃后自动重启（当前被忽略）。
+balloon: <integer> (0 - N)
+以 MiB 为单位的 VM 目标 RAM 量。使用零禁用气球驱动。
 
 
 
